@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The domain layer has NO package references, by design (ADR-002).
+    If this file ever grows an <ItemGroup>, a business rule has leaked into a framework.
+  -->
+
+</Project>

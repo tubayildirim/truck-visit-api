@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Like the domain, this layer references no NuGet packages (ADR-002).
+    Use cases are plain classes; there is no mediator, no mapper library and no validation
+    framework, because at four use cases each of those would add a dependency and a layer of
+    indirection without removing a single line of logic. See ADR-009.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\TruckVisit.Domain\TruckVisit.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,39 @@
+## .NET
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.user
+*.suo
+project.lock.json
+project.fragment.lock.json
+
+## Test / coverage
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+
+## IDE
+.vs/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+.idea/
+*.swp
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Secrets — never commit these
+appsettings.Local.json
+appsettings.*.Local.json
+*.pfx
+*.key
+.env
+.env.*
+!.env.example
