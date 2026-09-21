@@ -1,0 +1,18 @@
+<Project>
+
+  <!-- Inherit everything from the solution-wide settings, then relax what only tests need. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove($(MSBuildThisFile), $(MSBuildThisFileDirectory)../))" />
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+
+    <!--
+      CA1707 forbids underscores in member names. That rule exists to keep a public API tidy, and
+      a test project has no public API — its method names are documentation. "Skipping_a_step_is_
+      refused" reads as a sentence in a test report; "SkippingAStepIsRefused" does not. The rule is
+      switched off here and nowhere else, so production code keeps the full analyzer set.
+    -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+</Project>

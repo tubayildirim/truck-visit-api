@@ -71,7 +71,7 @@ internal sealed class CurrentUser(IHttpContextAccessor httpContextAccessor) : IC
         }
     }
 
-    private IReadOnlySet<string> ReadTerminalClaims()
+    private HashSet<string> ReadTerminalClaims()
     {
         var principal = Principal;
 
