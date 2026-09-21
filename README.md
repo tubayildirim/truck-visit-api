@@ -12,6 +12,7 @@ edited at all.
 | **Architecture** | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | **Assumptions & trade-offs** | [docs/ASSUMPTIONS-AND-TRADEOFFS.md](docs/ASSUMPTIONS-AND-TRADEOFFS.md) |
 | **Acceptance criteria, mapped** | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) |
+| **Decision records** | [docs/adr/](docs/adr/) — one file per decision |
 
 ---
 
@@ -171,13 +172,38 @@ curl -X PATCH "$API/api/visits/{id}/status" \
 ```
 
 Skipping a step (`PreRegistered → OnSite`) returns `409` with a problem document naming the allowed
-next status. Nothing is written when a transition is refused.
+next status. Nothing is written when a transition is refused. So does trying to leave (`Completed`)
+while a movement is still outstanding — see below.
+
+### Record a movement's completion
+
+```bash
+curl -X POST "$API/api/visits/{id}/movements/{movementId}/completion" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+A truck cannot reach `Completed` while any of its declared movements is still outstanding — the rule
+the case itself does not ask for: without it, a visit can be marked finished while the cargo it came
+for was never actually moved, and nothing in the system would notice.
 
 ### Read one visit, with its full audit trail
 
 ```bash
 curl "$API/api/visits/{id}" -H "Authorization: Bearer $TOKEN"
 ```
+
+Each entry in the trail carries `entryHash` and `previousHash` — entry *N*'s `previousHash` equals
+entry *N-1*'s `entryHash`, so the chain can be verified independently of this service's own answer.
+
+### Verify the audit trail
+
+```bash
+curl "$API/api/visits/{id}/audit/verification" -H "Authorization: Bearer $TOKEN"
+```
+
+Returns `isIntact`, how many entries were checked, and — when the chain is broken — exactly where and
+why. Always `200`, even when `isIntact` is `false`: a broken chain is a fact this endpoint reports,
+not a failure of the request itself.
 
 ### Search
 
@@ -197,6 +223,8 @@ curl -G "$API/api/visits" \
 | `terminalId` | string, normalised |
 | `currentStatus` | `PreRegistered` \| `AtGate` \| `OnSite` \| `Completed` |
 | `movementFrom`, `movementTo` | location codes, normalised |
+| `movementCompletedFrom`, `movementCompletedTo` | ISO 8601 |
+| `hasOutstandingMovements` | boolean — the gate worklist: on site, cargo not yet moved |
 | `createdTimeFrom`, `createdTimeTo` | ISO 8601 |
 | `createdBy` | string, exact match |
 | `page` | ≥ 1, default 1 |
@@ -277,12 +305,19 @@ src/
   TruckVisit.Infrastructure  EF Core, PostgreSQL, adapters
   TruckVisit.Api             HTTP edge, auth, observability, composition root
 tests/
-  TruckVisit.Domain.Tests        67 tests, no infrastructure
+  TruckVisit.Domain.Tests        domain rules, no infrastructure
   TruckVisit.Application.Tests   use-case behaviour with test doubles
-  TruckVisit.Api.IntegrationTests  real pipeline, real database
+  TruckVisit.ArchitectureTests   the layer rules and domain invariants, as a build gate
+  TruckVisit.Api.IntegrationTests  real pipeline, real PostgreSQL
 deploy/k8s                   sample Kubernetes manifest
-docs/                        architecture, assumptions and trade-offs
+tools/capacity                seed + EXPLAIN ANALYZE scripts behind ARCHITECTURE §9
+tools/demo                   a runnable walkthrough of the whole API lifecycle
+docs/                         architecture, assumptions and trade-offs, decision records
 ```
+
+148 tests in total (`dotnet test`) — domain and application rules, the architecture rules above
+enforced as a build gate, and 17 integration tests against a real PostgreSQL instance: persistence,
+the append-only trigger and its tamper detection, concurrency, and row-level tenant isolation.
 
 Dependencies point inward only. The domain and application layers reference no NuGet packages at
 all — if either grows an `<ItemGroup>`, a business rule has leaked into a framework.

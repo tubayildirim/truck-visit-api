@@ -496,19 +496,22 @@ own schema races itself the moment it runs more than one replica, which this one
 
 | # | Decision | Rationale |
 |---|---|---|
-| ADR-001 | Modular monolith, not microservices | One bounded context; 0.23 writes/s; boundaries enforced in code |
-| ADR-002 | Domain and Application have zero packages | A package reference there means a rule leaked into a framework |
-| ADR-003 | Append-only audit enforced at three levels | This table is what an audit inspects |
-| ADR-004 | Enums and codes stored as text | Rows outlive the code by years |
-| ADR-005 | Normalise in value-object constructors, invariant culture | Call sites cannot forget; `tr-TR` cannot corrupt |
-| ADR-006 | Denormalise `CurrentStatus`, `LastStatusChangedAt` | Avoids aggregation over the largest table on the hot path |
-| ADR-007 | `TerminalId` as tenancy key and leading index column | Makes the boundary physical, not conventional |
-| ADR-008 | Search returns projections, not aggregates | List views do not need history |
-| ADR-009 | No mediator, mapper or validation library | At four use cases each adds indirection without removing logic |
-| ADR-010 | Optimistic concurrency via `xmin` | Free in PostgreSQL; correct for a low-contention write path |
-| ADR-011 | `Idempotency-Key` on create | Gate hardware retries; one arrival must not become three records |
-| ADR-012 | Security advisories fail the build | A gate that warns is a gate that is ignored |
-| ADR-013 | Tenant isolation enforced twice: application filter and PostgreSQL RLS | App-layer filtering alone trusts every future query to remember it |
+| [ADR-001](adr/0001-modular-monolith-not-microservices.md) | Modular monolith, not microservices | One bounded context; 0.23 writes/s; boundaries enforced in code |
+| [ADR-002](adr/0002-domain-and-application-have-zero-packages.md) | Domain and Application have zero packages | A package reference there means a rule leaked into a framework |
+| [ADR-003](adr/0003-append-only-audit-enforced-at-three-levels.md) | Append-only audit enforced at three levels | This table is what an audit inspects |
+| [ADR-004](adr/0004-enums-and-codes-stored-as-text.md) | Enums and codes stored as text | Rows outlive the code by years |
+| [ADR-005](adr/0005-normalise-in-value-object-constructors.md) | Normalise in value-object constructors, invariant culture | Call sites cannot forget; `tr-TR` cannot corrupt |
+| [ADR-006](adr/0006-denormalise-current-status-and-last-status-changed-at.md) | Denormalise `CurrentStatus`, `LastStatusChangedAt` | Avoids aggregation over the largest table on the hot path |
+| [ADR-007](adr/0007-terminal-id-as-tenancy-key-and-leading-index-column.md) | `TerminalId` as tenancy key and leading index column | Makes the boundary physical, not conventional |
+| [ADR-008](adr/0008-search-returns-projections-not-aggregates.md) | Search returns projections, not aggregates | List views do not need history |
+| [ADR-009](adr/0009-no-mediator-mapper-or-validation-library.md) | No mediator, mapper or validation library | At four use cases each adds indirection without removing logic |
+| [ADR-010](adr/0010-optimistic-concurrency-via-xmin.md) | Optimistic concurrency via `xmin` | Free in PostgreSQL; correct for a low-contention write path |
+| [ADR-011](adr/0011-idempotency-key-on-create.md) | `Idempotency-Key` on create | Gate hardware retries; one arrival must not become three records |
+| [ADR-012](adr/0012-security-advisories-fail-the-build.md) | Security advisories fail the build | A gate that warns is a gate that is ignored |
+| [ADR-013](adr/0013-audit-trail-as-a-hash-chain.md) | Audit trail as a hash chain | Prevention and detection are different guarantees; the chain gives the second one |
+| [ADR-014](adr/0014-movement-completion-as-a-lifecycle-gate.md) | Movement completion as a lifecycle gate | A visit should not complete while its cargo was never actually moved |
+| [ADR-015](adr/0015-architecture-tests-as-a-build-gate.md) | Architecture tests as a build gate | A rule that lives only in a document erodes; a rule that fails the build holds |
+| [ADR-016](adr/0016-tenant-isolation-enforced-twice-application-and-postgresql-rls.md) | Tenant isolation enforced twice: application filter and PostgreSQL RLS | App-layer filtering alone trusts every future query to remember it |
 
 Full reasoning, alternatives considered and limitations accepted:
 [ASSUMPTIONS-AND-TRADEOFFS.md](ASSUMPTIONS-AND-TRADEOFFS.md).

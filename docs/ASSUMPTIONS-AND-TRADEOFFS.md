@@ -54,11 +54,16 @@ repository's filter composition is unaffected.
 **Ambiguity.** "Driver information must be captured", with no fields listed.
 
 **Assumed.** `FullName` (required), `DocumentId` (required — the ID or licence number checked at the
-barrier), `PhoneNumber` (optional).
+barrier), `CompanyName` (required), `PhoneNumber` (optional).
 
-**Why.** The minimum a gate operator actually needs to admit someone. Anything more would be
-collecting personal data with no stated purpose. This is the only personal data in the model and it
-sits under a seven-year retention rule — see §4 for the GDPR consequence.
+**Why.** A name to call out, a document to check against the ID at the barrier, a number to reach the
+cab — and the haulier, because in a ro-ro terminal the accountable party for a unit is the company,
+not the individual driver: who gets billed, who a damage claim goes to, who is called when a booked
+truck does not arrive. `CompanyName` is required for the same reason `FullName` and `DocumentId` are.
+`Nationality`, date of birth and licence expiry were considered and rejected: customs systems already
+hold them, the gate admission decision does not use them, and collecting a personal field because it
+might one day be useful is how a retention policy becomes unenforceable. This is the only personal
+data in the model and it sits under a seven-year retention rule — see §4 for the GDPR consequence.
 
 ### A5 — A visit must declare at least one movement
 

@@ -45,6 +45,9 @@ Where something is deliberately documented rather than built, it says so and lin
 | `terminalId`, `currentStatus`, `movementFrom`, `movementTo`, `createdTimeFrom`, `createdTimeTo`, `createdBy`, `page`, `pageSize` | All nine bound in `VisitEndpoints.SearchVisitsAsync`; `movementFrom`/`movementTo` interpreted as location codes — [assumption A3](ASSUMPTIONS-AND-TRADEOFFS.md#a3--movementfrom-and-movementto) |
 | Current status may be updated | `PATCH /api/visits/{id}/status` — absent from the task list; [assumption A2](ASSUMPTIONS-AND-TRADEOFFS.md#a2--a-status-update-endpoint-that-the-task-list-omits) |
 | All transitions retained as immutable audit history | See §2 above |
+| *(added)* A movement can be marked complete | `POST /api/visits/{id}/movements/{movementId}/completion` — a visit cannot reach `Completed` while any movement is still outstanding, a rule the task list does not ask for but which closes a real gap: without it a visit could be marked finished while its cargo was never moved |
+| *(added)* The audit chain can be verified independently | `GET /api/visits/{id}/audit/verification` — each entry carries a SHA-256 hash chained to the previous one (`StatusChange.EntryHash`/`PreviousHash`); this endpoint proves the chain is unbroken, or says exactly where it isn't — see [ARCHITECTURE §6](ARCHITECTURE.md#immutability--enforced-three-times) and `AuditTamperDetectionTests` |
+| `hasOutstandingMovements`, `movementCompletedFrom`, `movementCompletedTo` search filters | The gate worklist query: on site, cargo not yet moved |
 | Statuses: Pre-Registered, At Gate, On Site, Completed | `VisitStatus`; transition rules in `VisitStatusTransitions` — [assumption A1](ASSUMPTIONS-AND-TRADEOFFS.md#a1--lifecycle-shape) |
 | Record includes truck, driver, collections and deliveries | `Visit`, `Truck`, `Driver`, `Movement` |
 | Truck has at least a unit number and license plate | `Truck.Create` — both required |
@@ -52,8 +55,13 @@ Where something is deliberately documented rather than built, it says so and lin
 | Movements support collections and deliveries | `MovementType` |
 | Unit numbers and plates capitalised, no whitespace | `NormalizedCode` — normalised in the constructor, with a `tr-TR` test proving it is culture-independent |
 | Latest stable version of .NET | .NET 10 (LTS) across every project |
-| All business logic covered by unit tests | 67 domain + 30 application tests, no infrastructure required |
-| Integration tests where they add confidence | 6 tests against real PostgreSQL: persistence, the append-only trigger, concurrency, authorization scoping |
+| All business logic covered by unit tests | Domain and application layers, no infrastructure required — see the total below |
+| Architecture rules enforced, not just documented | `TruckVisit.ArchitectureTests` — layer boundaries, package references, and domain invariants (no public setter outside `init`, no mutable collection exposed) fail the build if broken |
+| Integration tests where they add confidence | 17 tests against real PostgreSQL, in three files: `VisitPersistenceTests` (round-tripping, concurrency, search), `AuditTamperDetectionTests` (the append-only trigger, and tamper detection with the trigger switched off), `TenantIsolationTests` (row-level security, proven the same way — assume every application-layer guard is absent) |
+
+**148 tests in total** (`dotnet test`). The count is not asserted here as a fixed number for long —
+it is the current total the moment this document was last touched; `dotnet test`'s own summary is
+the source of truth.
 
 ## 5. Security requirements
 
@@ -68,6 +76,7 @@ Where something is deliberately documented rather than built, it says so and lin
 | Secrets managed outside source control | Environment / user-secrets only; start-up fails fast if absent. `.gitignore` excludes local settings |
 | *(beyond the brief)* Supply-chain gate | `NuGetAudit` at `low` in `all` mode with warnings as errors; three transitive CVEs pinned forward |
 | *(beyond the brief)* Rate limiting | Per-principal, health probes exempt — [D9](ASSUMPTIONS-AND-TRADEOFFS.md#d9--rate-limiting) |
+| *(beyond the brief)* Tenant isolation enforced twice | Application-layer filtering, plus PostgreSQL row-level security as an independent database-level gate — [ADR-0016](adr/0016-tenant-isolation-enforced-twice-application-and-postgresql-rls.md), `TenantIsolationTests` |
 
 ## 6. Observability requirements
 
@@ -99,16 +108,21 @@ Where something is deliberately documented rather than built, it says so and lin
 | 4 | Implement search endpoint | `GET /api/visits`, filters + paging metadata |
 | 5 | Data storage setup | EF Core + PostgreSQL, migration, `docker-compose` |
 | 6 | Security implementation | §5 above |
-| 7 | Unit testing | 97 unit tests |
+| 7 | Unit testing | 148 tests total across four projects — see §4 above |
 | 8 | Code review and refactoring | Visible in the commit history — e.g. `harden(domain)` after review, and `fix(infra): a concurrent status change must answer 409, not 500`, which an integration test found |
+| 9 | *(added)* Prove the capacity claim | [ARCHITECTURE §9](ARCHITECTURE.md#9-scalability) — measured against a seeded million-row database, not left as arithmetic; `tools/capacity/` |
+| 10 | *(added)* CI | `.github/workflows/ci.yml` — build, analyse, test against a real PostgreSQL service container, then a separate image-build job |
 
 ## Submission checklist
 
 | Item | Status |
 |---|---|
 | Source code in a GitHub repository | ✅ |
-| Commit history showing progression of work | ✅ 23 commits, each explaining *why* |
+| Commit history showing progression of work | ✅ each commit explains *why*, not just *what* |
 | README with setup, execution and tooling requirements | ✅ [README.md](../README.md) |
 | Architecture documentation | ✅ [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Assumptions and trade-offs document | ✅ [ASSUMPTIONS-AND-TRADEOFFS.md](ASSUMPTIONS-AND-TRADEOFFS.md) |
+| Decision records, one per architectural choice | ✅ [docs/adr/](adr/) |
 | Test execution instructions | ✅ [README — Running the tests](../README.md#running-the-tests) |
+| CI pipeline | ✅ [.github/workflows/ci.yml](../.github/workflows/ci.yml) |
+| Capacity claim measured, not just argued | ✅ [ARCHITECTURE §9](ARCHITECTURE.md#9-scalability) |
