@@ -19,7 +19,7 @@ public sealed class DomainInvariantTests
     private static readonly Assembly Domain = typeof(Visit).Assembly;
 
     [Fact]
-    public void No_domain_entity_exposes_a_public_setter()
+    public void No_domain_type_can_be_mutated_after_construction()
     {
         var offenders = new List<string>();
 
@@ -28,16 +28,34 @@ public sealed class DomainInvariantTests
             offenders.AddRange(type
                 .GetProperties(BindingFlags.Public | BindingFlags.Instance)
                 .Where(property => property.SetMethod?.IsPublic == true)
+                .Where(property => !IsInitOnly(property))
                 .Select(property => $"{type.Name}.{property.Name}"));
         }
 
-        // A public setter is a second way to change state, and the audit guarantee depends on
+        // A settable property is a second way to change state, and the audit guarantee depends on
         // there being exactly one.
+        //
+        // 'init' accessors are excluded deliberately, and the distinction is the rule, not an
+        // exemption: an init-only property can be assigned while the object is being constructed
+        // and never again, so it cannot be used to reach around an aggregate's methods. Records
+        // like AuditVerification are built that way. The first version of this test said "no
+        // public setter" and failed on exactly those — which is the test doing its job: it forced
+        // the rule to be stated precisely instead of approximately.
         Assert.True(
             offenders.Count == 0,
-            $"Domain entities must only change through their own methods. Public setters found on: "
+            $"Domain types must only change through their own methods. Settable properties found on: "
             + string.Join(", ", offenders));
     }
+
+    /// <summary>
+    /// True when the setter is an <c>init</c> accessor, which the compiler marks with a required
+    /// modifier rather than a distinct member kind.
+    /// </summary>
+    private static bool IsInitOnly(PropertyInfo property) =>
+        property.SetMethod?.ReturnParameter
+            .GetRequiredCustomModifiers()
+            .Any(modifier => modifier.FullName == "System.Runtime.CompilerServices.IsExternalInit")
+        == true;
 
     [Fact]
     public void No_domain_type_exposes_a_mutable_collection()
