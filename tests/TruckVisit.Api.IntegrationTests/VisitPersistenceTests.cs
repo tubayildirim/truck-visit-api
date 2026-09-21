@@ -123,20 +123,37 @@ public sealed class VisitPersistenceTests(PostgresFixture fixture)
         await using var first = fixture.CreateContext();
         await using var second = fixture.CreateContext();
 
-        var byFirst = await first.Visits.SingleAsync(
+        // Through the repository, not the DbContext: the assertion is about what the API would
+        // actually answer, and the translation from a storage failure to a domain-meaningful one
+        // lives in the repository.
+        var repositoryForFirst = new VisitRepository(first);
+        var repositoryForSecond = new VisitRepository(second);
+
+        var byFirst = await repositoryForFirst.FindAsync(visit.Id, TestContext.Current.CancellationToken);
+        var bySecond = await repositoryForSecond.FindAsync(visit.Id, TestContext.Current.CancellationToken);
+
+        byFirst!.ChangeStatus(VisitStatus.AtGate, "gate-1", Now.AddMinutes(10));
+        bySecond!.ChangeStatus(VisitStatus.AtGate, "gate-2", Now.AddMinutes(11));
+
+        await repositoryForFirst.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        // Both gates computed the same next sequence number from the history they loaded, so the
+        // unique index refuses the second insert before the xmin token is even consulted. Either
+        // way it is one conflict and the caller must get one answer: 409, re-read and retry.
+        //
+        // This test is why the repository translates both failures. Written expecting only the
+        // concurrency exception, it failed against a real database — where an ordinary race at a
+        // busy gate would have surfaced as a 500.
+        await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => repositoryForSecond.SaveChangesAsync(TestContext.Current.CancellationToken));
+
+        // Gate-1's entry survived intact; nothing was overwritten.
+        await using var verify = fixture.CreateContext();
+        var stored = await verify.Visits.SingleAsync(
             candidate => candidate.Id == visit.Id, TestContext.Current.CancellationToken);
-        var bySecond = await second.Visits.SingleAsync(
-            candidate => candidate.Id == visit.Id, TestContext.Current.CancellationToken);
 
-        byFirst.ChangeStatus(VisitStatus.AtGate, "gate-1", Now.AddMinutes(10));
-        bySecond.ChangeStatus(VisitStatus.AtGate, "gate-2", Now.AddMinutes(11));
-
-        await first.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        // Without the xmin concurrency token this would succeed and silently overwrite gate-1's
-        // audit entry — the failure mode the token exists to prevent.
-        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(
-            () => second.SaveChangesAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(2, stored.StatusHistory.Count);
+        Assert.Equal("gate-1", stored.StatusHistory.Single(entry => entry.Sequence == 2).ChangedBy);
     }
 
     [Fact]

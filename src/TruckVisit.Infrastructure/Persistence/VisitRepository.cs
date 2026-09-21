@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Npgsql;
 using TruckVisit.Application.Abstractions;
 using TruckVisit.Application.Visits;
 using TruckVisit.Domain.Visits;
@@ -16,6 +18,9 @@ internal sealed class VisitRepository(TruckVisitDbContext context) : IVisitRepos
     public async Task AddAsync(Visit visit, CancellationToken cancellationToken) =>
         await context.Visits.AddAsync(visit, cancellationToken);
 
+    /// <summary>Unique index that gives each visit a gapless, non-colliding audit sequence.</summary>
+    private const string AuditSequenceIndex = "IX_visit_status_history_VisitId_Sequence";
+
     public async Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         try
@@ -24,16 +29,22 @@ internal sealed class VisitRepository(TruckVisitDbContext context) : IVisitRepos
         }
         catch (DbUpdateConcurrencyException exception)
         {
-            // Two gate terminals advanced the same visit at once. Surfaced as a domain-meaningful
-            // failure so the API can answer 409 rather than 500 — this is an expected outcome of a
-            // busy gate, not a defect.
-            var conflictingId = exception.Entries
-                .Select(entry => entry.Entity)
-                .OfType<Visit>()
-                .Select(visit => visit.Id)
-                .FirstOrDefault();
-
-            throw new ConcurrencyConflictException(conflictingId);
+            // The xmin token caught it: the visit row changed under us.
+            throw new ConcurrencyConflictException(ConflictingVisitId(exception.Entries));
+        }
+        catch (DbUpdateException exception) when (IsAuditSequenceCollision(exception))
+        {
+            // The unique index caught it first.
+            //
+            // Two gates advancing the same visit both compute the next sequence number from the
+            // history they loaded, so both try to insert the same one. EF sends that INSERT before
+            // the UPDATE that would have tripped the concurrency token, so without this branch a
+            // perfectly ordinary race at a busy gate would surface as a 500.
+            //
+            // It is the same conflict either way, and the caller gets the same answer: re-read and
+            // retry. Found by the integration test that runs the race for real — a unit test with
+            // a fake repository could not have produced it.
+            throw new ConcurrencyConflictException(ConflictingVisitId(exception.Entries));
         }
     }
 
@@ -90,6 +101,30 @@ internal sealed class VisitRepository(TruckVisitDbContext context) : IVisitRepos
             row.LastStatusChangedAt));
 
         return new PagedResult<VisitSummaryView>(items, criteria.Page, criteria.PageSize, totalCount);
+    }
+
+    private static bool IsAuditSequenceCollision(DbUpdateException exception) =>
+        exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } postgres
+        && string.Equals(postgres.ConstraintName, AuditSequenceIndex, StringComparison.Ordinal);
+
+    private static Guid ConflictingVisitId(IReadOnlyList<EntityEntry> entries)
+    {
+        foreach (var entry in entries)
+        {
+            // Depending on which constraint fired, the failing entry is either the visit itself or
+            // the audit entry that could not be appended to it.
+            switch (entry.Entity)
+            {
+                case Visit visit:
+                    return visit.Id;
+                case StatusChange change:
+                    return change.VisitId;
+                default:
+                    continue;
+            }
+        }
+
+        return Guid.Empty;
     }
 
     private static IQueryable<Visit> ApplyFilters(IQueryable<Visit> query, VisitSearchCriteria criteria)

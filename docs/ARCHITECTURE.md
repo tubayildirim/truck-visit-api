@@ -209,6 +209,18 @@ PostgreSQL's `xmin` system column as an optimistic concurrency token — no extr
 storage, no application code to maintain. Two gate terminals advancing the same visit simultaneously
 produce a 409 for the second, not a lost update.
 
+There are in fact **two** mechanisms, and which one fires is an implementation detail the caller
+should never see. Both gates compute the next audit sequence number from the history they loaded,
+so both attempt to insert the same one; EF sends that `INSERT` before the `UPDATE` that would have
+tripped the concurrency token, and the unique index on `(VisitId, Sequence)` rejects it first. The
+repository therefore translates *both* failures into the same domain-level conflict.
+
+That was not designed in advance — it was found by the integration test that runs the race against
+a real database. Written expecting only the concurrency exception, it failed, and without the fix
+an ordinary race at a busy gate would have reached the client as a 500 instead of a 409. It is the
+clearest argument in this repository for testing persistence against the real engine rather than an
+in-memory substitute: no amount of unit testing against a fake repository could have produced it.
+
 ### Retention and growth
 
 Seven years of history is a lifecycle problem, and the plan is documented rather than built:
