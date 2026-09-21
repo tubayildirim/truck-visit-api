@@ -1,0 +1,41 @@
+# Local development stack: the API and a throwaway PostgreSQL.
+#
+# The credentials below are local-only and intentionally boring. Nothing here is a secret: the
+# deployed environments read ConnectionStrings__TruckVisit from their own secret store, and this
+# file exists so `docker compose up` gives a working database on a laptop in one command.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: truckvisit-postgres
+    environment:
+      POSTGRES_DB: truckvisit
+      POSTGRES_USER: truckvisit
+      POSTGRES_PASSWORD: truckvisit
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # The API waits for this, so the first request does not race the database's own start-up.
+      test: ["CMD-SHELL", "pg_isready -U truckvisit -d truckvisit"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: truckvisit-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__TruckVisit: "Host=postgres;Port=5432;Database=truckvisit;Username=truckvisit;Password=truckvisit"
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres-data:
