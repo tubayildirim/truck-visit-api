@@ -89,14 +89,14 @@ internal static class Given
     public static RegisterVisitCommand Command(string terminalId = "DOVER") => new(
         terminalId,
         new TruckInput("mscu 123 4567", "34 abc 123"),
-        new DriverInput("Ada Lovelace", "A1234567", null),
+        new DriverInput("Ada Lovelace", "A1234567", "Lovelace Haulage Ltd", null),
         [new MovementInput(MovementType.Delivery, "MSCU1234567", "YARD1", "BERTH3")]);
 
     public static Visit Visit(string terminalId = "DOVER", string createdBy = "operator-1") =>
         Domain.Visits.Visit.Register(
             terminalId,
             Truck.Create("MSCU1234567", "34ABC123"),
-            Driver.Create("Ada Lovelace", "A1234567", null),
+            Driver.Create("Ada Lovelace", "A1234567", "Lovelace Haulage Ltd", null),
             [Movement.Create(MovementType.Delivery, "MSCU1234567", "YARD1", "BERTH3")],
             createdBy,
             Now);

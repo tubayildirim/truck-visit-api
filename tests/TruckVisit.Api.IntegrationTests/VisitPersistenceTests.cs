@@ -231,7 +231,7 @@ public sealed class VisitPersistenceTests(PostgresFixture fixture)
     private static Visit NewVisit(string terminalId) => Visit.Register(
         terminalId,
         Truck.Create("mscu 123 4567", "34 abc 123"),
-        Driver.Create("Ada Lovelace", "A1234567", null),
+        Driver.Create("Ada Lovelace", "A1234567", "Lovelace Haulage Ltd", null),
         [Movement.Create(MovementType.Delivery, "MSCU1234567", "YARD1", "BERTH3")],
         "operator-1",
         Now);
@@ -241,9 +241,12 @@ public sealed class VisitPersistenceTests(PostgresFixture fixture)
         CurrentStatus: null,
         MovementFrom: null,
         MovementTo: null,
+        MovementCompletedFrom: null,
+        MovementCompletedTo: null,
         CreatedTimeFrom: null,
         CreatedTimeTo: null,
         CreatedBy: null,
+        HasOutstandingMovements: null,
         Page: 1,
         PageSize: 25);
 }

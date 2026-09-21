@@ -81,7 +81,9 @@ internal sealed class VisitRepository(TruckVisitDbContext context) : IVisitRepos
                 TruckUnitNumber = visit.Truck.UnitNumber,
                 TruckLicensePlate = visit.Truck.LicensePlate,
                 DriverFullName = visit.Driver.FullName,
+                DriverCompanyName = visit.Driver.CompanyName,
                 MovementCount = visit.Movements.Count,
+                OutstandingMovementCount = visit.Movements.Count(movement => movement.CompletedAt == null),
                 visit.CreatedTime,
                 visit.CreatedBy,
                 visit.LastStatusChangedAt,
@@ -95,7 +97,9 @@ internal sealed class VisitRepository(TruckVisitDbContext context) : IVisitRepos
             row.TruckUnitNumber.Value,
             row.TruckLicensePlate.Value,
             row.DriverFullName,
+            row.DriverCompanyName,
             row.MovementCount,
+            row.OutstandingMovementCount,
             row.CreatedTime,
             row.CreatedBy,
             row.LastStatusChangedAt));
@@ -170,6 +174,27 @@ internal sealed class VisitRepository(TruckVisitDbContext context) : IVisitRepos
         {
             var destination = LocationCode.Create(movementTo, "movementTo");
             query = query.Where(visit => visit.Movements.Any(movement => movement.To == destination));
+        }
+
+        // "Which visits had work completed in this window" — the question a shift handover asks.
+        if (criteria.MovementCompletedFrom is { } completedFrom)
+        {
+            query = query.Where(visit => visit.Movements.Any(
+                movement => movement.CompletedAt >= completedFrom));
+        }
+
+        if (criteria.MovementCompletedTo is { } completedTo)
+        {
+            query = query.Where(visit => visit.Movements.Any(
+                movement => movement.CompletedAt <= completedTo));
+        }
+
+        // The gate's live worklist: trucks on site whose cargo has not been dealt with yet.
+        if (criteria.HasOutstandingMovements is { } outstanding)
+        {
+            query = outstanding
+                ? query.Where(visit => visit.Movements.Any(movement => movement.CompletedAt == null))
+                : query.Where(visit => !visit.Movements.Any(movement => movement.CompletedAt == null));
         }
 
         return query;

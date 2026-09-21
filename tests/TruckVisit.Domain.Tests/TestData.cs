@@ -11,7 +11,8 @@ internal static class TestData
 
     public static Truck ValidTruck() => Truck.Create("MSCU1234567", "34ABC123");
 
-    public static Driver ValidDriver() => Driver.Create("Ada Lovelace", "A1234567", "+905001234567");
+    public static Driver ValidDriver() =>
+        Driver.Create("Ada Lovelace", "A1234567", "Lovelace Haulage Ltd", "+905001234567");
 
     public static Movement ValidMovement(
         MovementType type = MovementType.Delivery,
@@ -33,7 +34,14 @@ internal static class TestData
             createdBy,
             createdTime ?? Now);
 
-    /// <summary>Returns a visit already advanced to <paramref name="target"/>.</summary>
+    /// <summary>
+    /// Returns a visit already advanced to <paramref name="target"/>.
+    /// </summary>
+    /// <remarks>
+    /// Completes the declared movements on the way through <see cref="VisitStatus.OnSite"/>,
+    /// because a visit cannot reach <see cref="VisitStatus.Completed"/> with work outstanding.
+    /// That the helper has to do this is itself the rule working.
+    /// </remarks>
     public static Visit VisitAt(VisitStatus target)
     {
         var visit = RegisteredVisit();
@@ -49,8 +57,24 @@ internal static class TestData
             }
 
             visit.ChangeStatus(next[0], "operator-1", Now.AddMinutes(offset++));
+
+            if (visit.CurrentStatus == VisitStatus.OnSite)
+            {
+                CompleteAllMovements(visit, Now.AddMinutes(offset++));
+            }
         }
 
         return visit;
+    }
+
+    /// <summary>Marks every declared movement as carried out. Requires the visit to be on site.</summary>
+    public static void CompleteAllMovements(Visit visit, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(visit);
+
+        foreach (var movement in visit.Movements.Where(candidate => !candidate.IsCompleted).ToArray())
+        {
+            visit.CompleteMovement(movement.Id, "yard-crane-1", at);
+        }
     }
 }

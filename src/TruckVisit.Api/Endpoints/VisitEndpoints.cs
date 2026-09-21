@@ -59,6 +59,19 @@ internal static class VisitEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
 
+        group.MapPost("/{id:guid}/movements/{movementId:guid}/completion", CompleteMovementAsync)
+            .WithName("CompleteMovement")
+            .WithSummary("Records that a collection or delivery has been carried out.")
+            .Produces<VisitDetailView>()
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapGet("/{id:guid}/audit/verification", VerifyAuditAsync)
+            .WithName("VerifyVisitAuditTrail")
+            .WithSummary("Checks that the visit's audit trail has not been altered.")
+            .Produces<AuditVerificationView>()
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
         return routes;
     }
 
@@ -94,9 +107,12 @@ internal static class VisitEndpoints
         VisitStatus? currentStatus,
         string? movementFrom,
         string? movementTo,
+        DateTimeOffset? movementCompletedFrom,
+        DateTimeOffset? movementCompletedTo,
         DateTimeOffset? createdTimeFrom,
         DateTimeOffset? createdTimeTo,
         string? createdBy,
+        bool? hasOutstandingMovements,
         int? page,
         int? pageSize,
         SearchVisitsHandler handler,
@@ -107,13 +123,38 @@ internal static class VisitEndpoints
             currentStatus,
             movementFrom,
             movementTo,
+            movementCompletedFrom,
+            movementCompletedTo,
             createdTimeFrom,
             createdTimeTo,
             createdBy,
+            hasOutstandingMovements,
             page,
             pageSize);
 
         return TypedResults.Ok(await handler.HandleAsync(query, cancellationToken));
+    }
+
+    private static async Task<IResult> CompleteMovementAsync(
+        Guid id,
+        Guid movementId,
+        CompleteMovementHandler handler,
+        CancellationToken cancellationToken) =>
+        TypedResults.Ok(await handler.HandleAsync(
+            new CompleteMovementCommand(id, movementId),
+            cancellationToken));
+
+    private static async Task<IResult> VerifyAuditAsync(
+        Guid id,
+        VerifyAuditTrailHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var verification = await handler.HandleAsync(id, cancellationToken);
+
+        // 200 either way, including when the chain is broken. A failed verification is a valid
+        // answer to a valid question, not a failed request — and an auditor needs the finding in
+        // the body, not an error status their tooling might retry or discard.
+        return TypedResults.Ok(verification);
     }
 
     private static async Task<IResult> ChangeStatusAsync(

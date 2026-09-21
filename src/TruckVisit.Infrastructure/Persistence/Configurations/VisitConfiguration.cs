@@ -111,9 +111,18 @@ internal sealed class VisitConfiguration : IEntityTypeConfiguration<Visit>
                 .HasMaxLength(Driver.MaxDocumentIdLength)
                 .IsRequired();
 
+            driver.Property(value => value.CompanyName)
+                .HasColumnName("driver_company_name")
+                .HasMaxLength(Driver.MaxCompanyNameLength)
+                .IsRequired();
+
             driver.Property(value => value.PhoneNumber)
                 .HasColumnName("driver_phone_number")
                 .HasMaxLength(Driver.MaxPhoneNumberLength);
+
+            // Operations routinely ask "what is this haulier doing at our terminals today" —
+            // for billing queries, and when a carrier is suspended.
+            driver.HasIndex(value => value.CompanyName);
         });
 
         builder.Navigation(visit => visit.Driver).IsRequired();
@@ -149,10 +158,19 @@ internal sealed class VisitConfiguration : IEntityTypeConfiguration<Visit>
                 .HasMaxLength(LocationCode.MaxLength)
                 .IsRequired();
 
+            movement.Property(value => value.CompletedAt);
+
+            movement.Property(value => value.CompletedBy)
+                .HasMaxLength(Visit.MaxActorLength);
+
             // The movementFrom / movementTo search filters resolve through these.
             movement.HasIndex(value => value.From);
             movement.HasIndex(value => value.To);
             movement.HasIndex(value => value.UnitNumber);
+
+            // Serves both the movementCompleted* range filter and the outstanding-work query.
+            // Nullable by design: a null here *is* the "not done yet" state.
+            movement.HasIndex(value => value.CompletedAt);
         });
     }
 
@@ -186,6 +204,19 @@ internal sealed class VisitConfiguration : IEntityTypeConfiguration<Visit>
 
             history.Property(entry => entry.Reason)
                 .HasMaxLength(StatusChange.MaxReasonLength);
+
+            // Fixed-length by definition: a SHA-256 digest in lowercase hex is always 64
+            // characters. Declaring the exact length lets the database reject a truncated or
+            // padded value outright rather than storing something that can never verify.
+            history.Property(entry => entry.EntryHash)
+                .HasMaxLength(StatusChange.HashLength)
+                .IsFixedLength()
+                .IsRequired();
+
+            // Null only for the first entry in a visit's chain.
+            history.Property(entry => entry.PreviousHash)
+                .HasMaxLength(StatusChange.HashLength)
+                .IsFixedLength();
 
             // Unique, so a duplicated append is refused by the database rather than silently
             // producing two "step 3"s in an audit trail someone will one day have to defend.

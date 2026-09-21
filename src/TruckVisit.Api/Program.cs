@@ -56,6 +56,8 @@ builder.Services.AddScoped<RegisterVisitHandler>();
 builder.Services.AddScoped<GetVisitByIdHandler>();
 builder.Services.AddScoped<SearchVisitsHandler>();
 builder.Services.AddScoped<ChangeVisitStatusHandler>();
+builder.Services.AddScoped<CompleteMovementHandler>();
+builder.Services.AddScoped<VerifyAuditTrailHandler>();
 
 builder.Services.AddMetrics();
 builder.Services.AddSingleton<VisitMetrics>();

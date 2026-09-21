@@ -171,7 +171,7 @@ public sealed class SearchVisitsHandlerTests
         _repository.LastSearchCriteria ?? throw new InvalidOperationException("Search was not called.");
 
     private static SearchVisitsQuery Query() =>
-        new(null, null, null, null, null, null, null, null, null);
+        new(null, null, null, null, null, null, null, null, null, null, null, null);
 
     private SearchVisitsHandler Handler(ICurrentUser user) => new(_repository, user);
 }
