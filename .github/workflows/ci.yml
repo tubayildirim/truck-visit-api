@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build, analyse and test
+    runs-on: ubuntu-latest
+
+    services:
+      # A service container rather than Testcontainers: the database is already there, so the
+      # suite does not pay a container start-up on every run. PostgresFixture prefers
+      # TRUCKVISIT_TEST_DB when it is set, and falls back to Testcontainers on a developer's
+      # machine — one fixture, two ways of getting a database, no CI-only code path.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: truckvisit
+          POSTGRES_USER: truckvisit
+          POSTGRES_PASSWORD: truckvisit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U truckvisit -d truckvisit"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        # Fails the build on a known vulnerability in any dependency, direct or transitive:
+        # NuGetAudit runs at 'low' severity in 'all' mode and warnings are errors.
+        run: dotnet restore
+
+      - name: Build
+        # No --no-restore shortcut that would skip the audit above, and no relaxed configuration:
+        # the analyzer set and warnings-as-errors that run locally are what run here.
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test
+        env:
+          TRUCKVISIT_TEST_DB: "Host=localhost;Port=5432;Database=truckvisit;Username=truckvisit;Password=truckvisit"
+        run: dotnet test --no-build --configuration Release --logger "console;verbosity=normal"
+
+  container:
+    name: Container image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image build runs the domain tests inside it, so this step also proves that an image
+      # which cannot pass its own tests is never produced.
+      - name: Build image
+        run: docker build --tag truckvisit-api:ci .

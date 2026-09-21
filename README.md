@@ -1,7 +1,11 @@
 # Truck Visit Management API
 
+[![CI](https://github.com/tubayildirim/truck-visit-api/actions/workflows/ci.yml/badge.svg)](https://github.com/tubayildirim/truck-visit-api/actions/workflows/ci.yml)
+
 A .NET 10 REST API for the "Smart Gate" solution: it records truck visits to a terminal, tracks
-them through their lifecycle, and retains every status change as an immutable audit trail.
+them through their lifecycle, and retains every status change as a **tamper-evident** audit trail —
+one that not only cannot be edited through the application, but can be *proved* not to have been
+edited at all.
 
 | | |
 |---|---|
