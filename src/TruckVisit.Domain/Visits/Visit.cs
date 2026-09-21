@@ -59,6 +59,7 @@ public sealed class Visit
         CreatedBy = createdBy;
         CreatedTime = createdTime;
         CurrentStatus = VisitStatusTransitions.Initial;
+        LastStatusChangedAt = createdTime;
     }
 
     public Guid Id { get; private set; }
@@ -82,9 +83,14 @@ public sealed class Visit
     /// <summary>Authenticated principal that registered the visit.</summary>
     public string CreatedBy { get; private set; }
 
-    /// <summary>Timestamp of the most recent audit entry, used to keep the trail monotonic.</summary>
-    public DateTimeOffset LastStatusChangedAt =>
-        _statusHistory.Count == 0 ? CreatedTime : _statusHistory[^1].ChangedAt;
+    /// <summary>
+    /// Timestamp of the most recent audit entry. Kept as stored state, for the same reason
+    /// <see cref="CurrentStatus"/> is: the search projection sorts and displays it on the hot path,
+    /// and deriving it would mean a correlated MAX() over the history table for every row returned.
+    /// It also gives <see cref="ChangeStatus"/> a monotonicity check that does not depend on the
+    /// history collection having been loaded.
+    /// </summary>
+    public DateTimeOffset LastStatusChangedAt { get; private set; }
 
     /// <summary>
     /// Registers a new visit in <see cref="VisitStatus.PreRegistered"/> and opens its audit trail.
@@ -194,6 +200,7 @@ public sealed class Visit
 
         _statusHistory.Add(entry);
         CurrentStatus = target;
+        LastStatusChangedAt = occurredAt;
 
         return entry;
     }
