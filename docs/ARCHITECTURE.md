@@ -182,8 +182,11 @@ this enum.
    this by reflection, so adding one fails the build.
 2. **Persistence level.** `SaveChanges` inspects the change tracker and throws if any audit entry
    is `Modified` or `Deleted` — catching attached graphs and bulk operations that bypass the model.
-3. **Database level.** The migration revokes `UPDATE` and `DELETE` on `visit_status_history`, so a
-   direct SQL statement is refused too.
+3. **Database level.** The migration installs a `BEFORE UPDATE OR DELETE` trigger on
+   `visit_status_history` that raises an exception, so a direct SQL statement is refused too. A
+   trigger rather than a `REVOKE`, because `REVOKE` does not constrain a superuser and the owning
+   role usually is one — the guarantee has to hold for every connection, not just the polite ones.
+   `REVOKE` is still applied to the application role in production as a second layer.
 
 Defence in depth is warranted here because this table is what a regulatory audit actually inspects.
 

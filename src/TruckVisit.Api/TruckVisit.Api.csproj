@@ -8,6 +8,17 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+
+    <!--
+      Design-time only. The EF tools resolve the DbContext through the *startup* project, so the
+      reference has to be here even though the context itself lives in Infrastructure.
+      PrivateAssets keeps it out of the published output: it is a build-time tool, and shipping it
+      into the runtime image would add surface area for nothing.
+    -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>
