@@ -1,6 +1,9 @@
+using System.Security.Claims;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using TruckVisit.Api.Diagnostics;
 using TruckVisit.Api.Endpoints;
@@ -83,6 +86,39 @@ builder.Services.AddAuthorizationBuilder()
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 
+// Rate limiting protects the 99.95% target from a single misbehaving client. Gate devices retry
+// aggressively and a polling loop with a bad interval can saturate a replica on its own; without
+// a limit, one faulty device degrades the service for every operator sharing it.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+    {
+        // Probes must never be throttled: a rate-limited readiness check would pull healthy
+        // replicas out of the load balancer precisely when the service is busiest.
+        if (context.Request.Path.StartsWithSegments("/health"))
+        {
+            return RateLimitPartition.GetNoLimiter("health");
+        }
+
+        // Partition by principal so one client's burst cannot consume another's budget. The
+        // remote address is only a fallback for unauthenticated traffic, which reaches nothing.
+        var partitionKey = context.User.FindFirstValue("sub")
+            ?? context.Connection.RemoteIpAddress?.ToString()
+            ?? "anonymous";
+
+        return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+        {
+            // Generous against legitimate use — an operator screen polling every two seconds uses
+            // 30 — and far below what it takes to hurt a replica.
+            PermitLimit = 600,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+        });
+    });
+});
+
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     // Behind an ingress or ALB, without this the client IP in the logs is the proxy's and the
@@ -113,6 +149,10 @@ if (!app.Environment.IsDevelopment())
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// After authentication, so the limiter can partition by principal rather than by IP — otherwise
+// every client behind one NAT gateway would share a single budget.
+app.UseRateLimiter();
 
 if (app.Environment.IsDevelopment())
 {
