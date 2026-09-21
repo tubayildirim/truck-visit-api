@@ -94,6 +94,9 @@ public sealed class Visit
     /// </summary>
     public DateTimeOffset LastStatusChangedAt { get; private set; }
 
+    /// <summary>True while any declared collection or delivery has not been carried out.</summary>
+    public bool HasOutstandingMovements => _movements.Exists(movement => !movement.IsCompleted);
+
     /// <summary>
     /// Registers a new visit in <see cref="VisitStatus.PreRegistered"/> and opens its audit trail.
     /// </summary>
@@ -120,7 +123,8 @@ public sealed class Visit
         visit.SetMovements(movements);
 
         // The registration itself is an auditable event, so the trail starts here with no
-        // predecessor status rather than at the first transition.
+        // predecessor status rather than at the first transition. It is also the anchor of the
+        // hash chain: the only entry with no previous hash.
         visit._statusHistory.Add(new StatusChange(
             visit.Id,
             sequence: 1,
@@ -128,7 +132,8 @@ public sealed class Visit
             to: VisitStatusTransitions.Initial,
             changedAt: createdTime,
             changedBy: visit.CreatedBy,
-            reason: "Visit registered."));
+            reason: "Visit registered.",
+            previousHash: null));
 
         return visit;
     }
@@ -139,7 +144,8 @@ public sealed class Visit
     /// <returns>The audit entry that was appended.</returns>
     /// <exception cref="DomainValidationException">The actor or reason is not acceptable.</exception>
     /// <exception cref="InvalidStatusTransitionException">
-    /// The visit is already in <paramref name="target"/>, or the transition is not permitted.
+    /// The visit is already in <paramref name="target"/>, the transition is not permitted, or work
+    /// is still outstanding.
     /// </exception>
     public StatusChange ChangeStatus(
         VisitStatus target,
@@ -182,6 +188,20 @@ public sealed class Visit
                 target.ToString());
         }
 
+        if (target == VisitStatus.Completed && HasOutstandingMovements)
+        {
+            // A truck does not leave until the work it came for is done. Without this the record
+            // would happily show a completed visit whose cargo was never moved, and the gate would
+            // have no way to notice — the two halves of a visit would drift apart silently.
+            var outstanding = _movements.Count(movement => !movement.IsCompleted);
+
+            throw new InvalidStatusTransitionException(
+                $"Cannot complete the visit while {outstanding} movement(s) remain outstanding. "
+                + "Record each collection and delivery first.",
+                CurrentStatus.ToString(),
+                target.ToString());
+        }
+
         if (occurredAt < LastStatusChangedAt)
         {
             // An audit trail that can go backwards in time is not an audit trail. This guards
@@ -198,13 +218,108 @@ public sealed class Visit
             to: target,
             changedAt: occurredAt,
             changedBy: actor,
-            reason: normalizedReason);
+            reason: normalizedReason,
+            // Chains this entry to the one before it. See StatusChange for why.
+            previousHash: _statusHistory[^1].EntryHash);
 
         _statusHistory.Add(entry);
         CurrentStatus = target;
         LastStatusChangedAt = occurredAt;
 
         return entry;
+    }
+
+    /// <summary>
+    /// Records that a declared collection or delivery has actually been carried out.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately does not append to <see cref="StatusHistory"/>. That trail is about the
+    /// visit's status, and mixing a second kind of event into it would make "the fourth entry" mean
+    /// two different things to an auditor. A movement carries its own completion timestamp and
+    /// actor, which is its audit record.
+    /// </remarks>
+    /// <exception cref="InvalidStatusTransitionException">The truck is not on site.</exception>
+    /// <exception cref="DomainValidationException">The movement is unknown or already completed.</exception>
+    public Movement CompleteMovement(Guid movementId, string? completedBy, DateTimeOffset occurredAt)
+    {
+        var actor = DomainText.Required(completedBy, "completedBy", MaxActorLength);
+
+        if (CurrentStatus != VisitStatus.OnSite)
+        {
+            // Cargo cannot be moved before the truck has been admitted, or after it has left.
+            throw new InvalidStatusTransitionException(
+                $"Movements can only be completed while the visit is '{VisitStatus.OnSite}'; "
+                + $"this visit is '{CurrentStatus}'.",
+                CurrentStatus.ToString(),
+                VisitStatus.OnSite.ToString());
+        }
+
+        var movement = _movements.Find(candidate => candidate.Id == movementId)
+            ?? throw new DomainValidationException(
+                "movementId",
+                $"Movement '{movementId}' does not belong to this visit.");
+
+        if (occurredAt < LastStatusChangedAt)
+        {
+            throw new DomainValidationException(
+                "occurredAt",
+                $"A movement cannot be completed before the truck was admitted ({LastStatusChangedAt:O}).");
+        }
+
+        movement.MarkCompleted(occurredAt, actor);
+
+        return movement;
+    }
+
+    /// <summary>
+    /// Walks the audit trail and checks that every entry still hashes to its stored digest and
+    /// links to the entry before it.
+    /// </summary>
+    /// <remarks>
+    /// This is the detection half of the audit guarantee. The type system and the database trigger
+    /// prevent an edit; this reports whether one happened anyway — which is the question a
+    /// regulator actually asks. It needs no reference copy: the chain carries its own proof.
+    /// </remarks>
+    public AuditVerification VerifyAuditTrail()
+    {
+        var ordered = _statusHistory.OrderBy(entry => entry.Sequence).ToArray();
+
+        string? expectedPreviousHash = null;
+
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            var entry = ordered[index];
+
+            if (entry.Sequence != index + 1)
+            {
+                // A gap or a duplicate means an entry was removed or inserted, which the unique
+                // index should have prevented — so finding one here is itself the finding.
+                return AuditVerification.Broken(
+                    ordered.Length,
+                    entry.Sequence,
+                    $"Expected sequence {index + 1} but found {entry.Sequence}; the trail has a gap.");
+            }
+
+            if (!string.Equals(entry.PreviousHash, expectedPreviousHash, StringComparison.Ordinal))
+            {
+                return AuditVerification.Broken(
+                    ordered.Length,
+                    entry.Sequence,
+                    "The entry does not link to its predecessor; an earlier entry was altered.");
+            }
+
+            if (!entry.IsSelfConsistent())
+            {
+                return AuditVerification.Broken(
+                    ordered.Length,
+                    entry.Sequence,
+                    "The entry's contents do not match its stored hash; this entry was altered.");
+            }
+
+            expectedPreviousHash = entry.EntryHash;
+        }
+
+        return AuditVerification.Intact(ordered.Length);
     }
 
     private void SetMovements(IReadOnlyList<Movement> movements)

@@ -22,11 +22,28 @@ public static class VisitMapper
             visit.TerminalId.Value,
             visit.CurrentStatus.ToString(),
             new TruckView(visit.Truck.UnitNumber.Value, visit.Truck.LicensePlate.Value),
-            new DriverView(visit.Driver.FullName, visit.Driver.DocumentId, visit.Driver.PhoneNumber),
+            new DriverView(
+                visit.Driver.FullName,
+                visit.Driver.DocumentId,
+                visit.Driver.CompanyName,
+                visit.Driver.PhoneNumber),
             [.. visit.Movements.Select(ToView)],
             [.. visit.StatusHistory.OrderBy(entry => entry.Sequence).Select(ToView)],
+            visit.HasOutstandingMovements,
             visit.CreatedTime,
             visit.CreatedBy);
+    }
+
+    public static AuditVerificationView ToView(Guid visitId, AuditVerification verification)
+    {
+        ArgumentNullException.ThrowIfNull(verification);
+
+        return new AuditVerificationView(
+            visitId,
+            verification.IsIntact,
+            verification.EntriesChecked,
+            verification.BrokenAtSequence,
+            verification.Finding);
     }
 
     private static MovementView ToView(Movement movement) => new(
@@ -34,7 +51,9 @@ public static class VisitMapper
         movement.Type.ToString(),
         movement.UnitNumber.Value,
         movement.From.Value,
-        movement.To.Value);
+        movement.To.Value,
+        movement.CompletedAt,
+        movement.CompletedBy);
 
     private static StatusChangeView ToView(StatusChange change) => new(
         change.Sequence,
@@ -42,5 +61,7 @@ public static class VisitMapper
         change.To.ToString(),
         change.ChangedAt,
         change.ChangedBy,
-        change.Reason);
+        change.Reason,
+        change.EntryHash,
+        change.PreviousHash);
 }

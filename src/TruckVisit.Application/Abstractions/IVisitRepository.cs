@@ -16,9 +16,12 @@ public sealed record VisitSearchCriteria(
     VisitStatus? CurrentStatus,
     string? MovementFrom,
     string? MovementTo,
+    DateTimeOffset? MovementCompletedFrom,
+    DateTimeOffset? MovementCompletedTo,
     DateTimeOffset? CreatedTimeFrom,
     DateTimeOffset? CreatedTimeTo,
     string? CreatedBy,
+    bool? HasOutstandingMovements,
     int Page,
     int PageSize);
 

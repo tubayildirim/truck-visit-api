@@ -10,7 +10,11 @@ namespace TruckVisit.Application.Visits;
 
 public sealed record TruckInput(string? UnitNumber, string? LicensePlate);
 
-public sealed record DriverInput(string? FullName, string? DocumentId, string? PhoneNumber);
+public sealed record DriverInput(
+    string? FullName,
+    string? DocumentId,
+    string? CompanyName,
+    string? PhoneNumber);
 
 public sealed record MovementInput(MovementType Type, string? UnitNumber, string? From, string? To);
 
@@ -25,17 +29,29 @@ public sealed record ChangeVisitStatusCommand(
     VisitStatus TargetStatus,
     string? Reason);
 
+/// <summary>Records that a declared collection or delivery has actually been carried out.</summary>
+public sealed record CompleteMovementCommand(Guid VisitId, Guid MovementId);
+
 /// <summary>
-/// The search endpoint's query parameters, exactly as the case lists them.
+/// The search endpoint's query parameters.
 /// </summary>
+/// <remarks>
+/// <c>movementFrom</c> and <c>movementTo</c> are the case's own (undefined) parameters, read here
+/// as location codes. <c>movementCompletedFrom</c> / <c>movementCompletedTo</c> are ours: movement
+/// timing is a real domain concept, and it gets its own clearly named pair rather than overloading
+/// an ambiguous name to mean two different things.
+/// </remarks>
 public sealed record SearchVisitsQuery(
     string? TerminalId,
     VisitStatus? CurrentStatus,
     string? MovementFrom,
     string? MovementTo,
+    DateTimeOffset? MovementCompletedFrom,
+    DateTimeOffset? MovementCompletedTo,
     DateTimeOffset? CreatedTimeFrom,
     DateTimeOffset? CreatedTimeTo,
     string? CreatedBy,
+    bool? HasOutstandingMovements,
     int? Page,
     int? PageSize);
 
@@ -47,19 +63,37 @@ public sealed record SearchVisitsQuery(
 
 public sealed record TruckView(string UnitNumber, string LicensePlate);
 
-public sealed record DriverView(string FullName, string DocumentId, string? PhoneNumber);
+public sealed record DriverView(
+    string FullName,
+    string DocumentId,
+    string CompanyName,
+    string? PhoneNumber);
 
-public sealed record MovementView(Guid Id, string Type, string UnitNumber, string From, string To);
+public sealed record MovementView(
+    Guid Id,
+    string Type,
+    string UnitNumber,
+    string From,
+    string To,
+    DateTimeOffset? CompletedAt,
+    string? CompletedBy);
 
+/// <remarks>
+/// <see cref="EntryHash"/> and <see cref="PreviousHash"/> are exposed so an auditor can verify the
+/// chain independently, with their own tooling, without having to trust this service's own
+/// verification endpoint.
+/// </remarks>
 public sealed record StatusChangeView(
     int Sequence,
     string? From,
     string To,
     DateTimeOffset ChangedAt,
     string ChangedBy,
-    string? Reason);
+    string? Reason,
+    string EntryHash,
+    string? PreviousHash);
 
-/// <summary>Full representation returned by create and read-by-id.</summary>
+/// <summary>Full representation returned by create, read-by-id and the write endpoints.</summary>
 public sealed record VisitDetailView(
     Guid Id,
     string TerminalId,
@@ -68,8 +102,17 @@ public sealed record VisitDetailView(
     DriverView Driver,
     IReadOnlyList<MovementView> Movements,
     IReadOnlyList<StatusChangeView> StatusHistory,
+    bool HasOutstandingMovements,
     DateTimeOffset CreatedTime,
     string CreatedBy);
+
+/// <summary>Result of checking that a visit's audit trail has not been altered.</summary>
+public sealed record AuditVerificationView(
+    Guid VisitId,
+    bool IsIntact,
+    int EntriesChecked,
+    int? BrokenAtSequence,
+    string? Finding);
 
 /// <summary>
 /// Trimmed representation returned by search.
@@ -87,7 +130,9 @@ public sealed record VisitSummaryView(
     string TruckUnitNumber,
     string TruckLicensePlate,
     string DriverFullName,
+    string DriverCompanyName,
     int MovementCount,
+    int OutstandingMovementCount,
     DateTimeOffset CreatedTime,
     string CreatedBy,
     DateTimeOffset LastStatusChangedAt);

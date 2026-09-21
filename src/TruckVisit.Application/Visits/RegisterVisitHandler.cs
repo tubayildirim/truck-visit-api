@@ -57,6 +57,7 @@ public sealed class RegisterVisitHandler(
         var driver = Driver.Create(
             command.Driver?.FullName,
             command.Driver?.DocumentId,
+            command.Driver?.CompanyName,
             command.Driver?.PhoneNumber);
 
         var movements = (command.Movements ?? [])

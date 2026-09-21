@@ -22,12 +22,14 @@ public sealed class SearchVisitsHandler(IVisitRepository repository, ICurrentUse
         var page = ResolvePage(query.Page);
         var pageSize = ResolvePageSize(query.PageSize);
 
-        if (query.CreatedTimeFrom is { } from && query.CreatedTimeTo is { } to && from > to)
-        {
-            throw new RequestValidationException(
-                "createdTimeFrom",
-                "createdTimeFrom must not be later than createdTimeTo.");
-        }
+        RejectInvertedRange(
+            query.CreatedTimeFrom, query.CreatedTimeTo, "createdTimeFrom", "createdTimeTo");
+
+        RejectInvertedRange(
+            query.MovementCompletedFrom,
+            query.MovementCompletedTo,
+            "movementCompletedFrom",
+            "movementCompletedTo");
 
         if (query.CurrentStatus is { } status && !Enum.IsDefined(status))
         {
@@ -43,9 +45,12 @@ public sealed class SearchVisitsHandler(IVisitRepository repository, ICurrentUse
             // so "yard 1" finds the rows saved as "YARD1".
             MovementFrom: NormalizeLocation(query.MovementFrom, "movementFrom"),
             MovementTo: NormalizeLocation(query.MovementTo, "movementTo"),
+            MovementCompletedFrom: query.MovementCompletedFrom,
+            MovementCompletedTo: query.MovementCompletedTo,
             CreatedTimeFrom: query.CreatedTimeFrom,
             CreatedTimeTo: query.CreatedTimeTo,
             CreatedBy: DomainTextTrim(query.CreatedBy),
+            HasOutstandingMovements: query.HasOutstandingMovements,
             Page: page,
             PageSize: pageSize);
 
@@ -110,6 +115,20 @@ public sealed class SearchVisitsHandler(IVisitRepository repository, ICurrentUse
                 "pageSize",
                 $"pageSize cannot exceed {PagingDefaults.MaxPageSize}.")
             : requested.Value;
+    }
+
+    private static void RejectInvertedRange(
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        string fromField,
+        string toField)
+    {
+        if (from is { } start && to is { } end && start > end)
+        {
+            throw new RequestValidationException(
+                fromField,
+                $"{fromField} must not be later than {toField}.");
+        }
     }
 
     private static string? NormalizeLocation(string? raw, string field) =>
