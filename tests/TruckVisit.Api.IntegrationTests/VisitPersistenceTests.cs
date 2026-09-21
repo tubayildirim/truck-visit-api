@@ -16,7 +16,7 @@ namespace TruckVisit.Api.IntegrationTests;
 /// Those are the tests here — deliberately few, and each one about something the unit suite
 /// cannot reach.
 /// </remarks>
-[Collection(PostgresCollection.Name)]
+[Collection(PostgresDatabase.Name)]
 public sealed class VisitPersistenceTests(PostgresFixture fixture)
 {
     [Fact]

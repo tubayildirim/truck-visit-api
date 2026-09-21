@@ -46,8 +46,10 @@ public sealed class PostgresFixture : IAsyncLifetime
         {
             try
             {
-                _container = new PostgreSqlBuilder()
-                    .WithImage("postgres:17-alpine")
+                // The image is pinned in the constructor rather than by WithImage: the parameterless
+                // overload is obsolete, and an unpinned image would let a test suite change
+                // behaviour without a single line of code changing.
+                _container = new PostgreSqlBuilder("postgres:17-alpine")
                     .WithDatabase("truckvisit")
                     .WithUsername("truckvisit")
                     .WithPassword("truckvisit")
@@ -106,8 +108,12 @@ public sealed class PostgresFixture : IAsyncLifetime
     }
 }
 
+/// <summary>
+/// Marker type that binds every test class in the collection to one shared database, so the
+/// container starts once for the whole suite rather than once per class.
+/// </summary>
 [CollectionDefinition(Name)]
-public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>
+public sealed class PostgresDatabase : ICollectionFixture<PostgresFixture>
 {
     public const string Name = "postgres";
 }
