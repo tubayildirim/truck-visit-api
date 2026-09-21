@@ -222,10 +222,15 @@ ships the means to check it against a query planner:
 
 ```bash
 docker compose up -d postgres
+dotnet restore
+dotnet tool restore
 dotnet ef database update --project src/TruckVisit.Infrastructure --startup-project src/TruckVisit.Api
 docker compose exec -T postgres psql -U truckvisit -d truckvisit -f - < tools/capacity/seed.sql
 docker compose exec -T postgres psql -U truckvisit -d truckvisit -f - < tools/capacity/explain.sql
 ```
+
+> `dotnet restore` is not ceremony here: the EF tools read `obj/project.assets.json`, so on a fresh
+> clone `database update` fails with `NETSDK1004` before it ever reaches the database.
 
 The seed builds a million visits with their movements and audit trails, deliberately pessimistic:
 random UUIDs rather than the time-ordered v7 keys the application generates, so the index is more

@@ -22,6 +22,7 @@
 -- Testcontainers instance and never touch this database, so a fresh compose stack is empty:
 --
 --   docker compose up -d postgres
+--   dotnet restore && dotnet tool restore
 --   dotnet ef database update --project src/TruckVisit.Infrastructure --startup-project src/TruckVisit.Api
 --   docker compose exec -T postgres psql -U truckvisit -d truckvisit -f - < tools/capacity/seed.sql
 -- =============================================================================================
