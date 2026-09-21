@@ -14,4 +14,11 @@
     <ProjectReference Include="..\TruckVisit.Application\TruckVisit.Application.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The repository and the idempotency store are internal by design: nothing outside this
+         assembly should construct them. The integration tests exercise them directly because
+         that is where the persistence guarantees actually live. -->
+    <InternalsVisibleTo Include="TruckVisit.Api.IntegrationTests" />
+  </ItemGroup>
+
 </Project>
