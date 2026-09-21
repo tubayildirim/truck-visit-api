@@ -15,6 +15,20 @@ edited at all.
 
 ---
 
+## See it work in two minutes
+
+```bash
+docker compose up -d postgres
+dotnet run --project src/TruckVisit.Api
+dotnet user-jwts create --project src/TruckVisit.Api --name operator-1 --claim terminal=DOVER
+```
+
+Then open [`tools/demo/visits.http`](tools/demo/visits.http), paste the token at the top and send
+the requests in order. It walks one truck through its whole lifecycle, then exercises everything
+that should be refused: skipping a lifecycle step, leaving with the cargo unmoved, changing a
+completed visit, reading a visit at a terminal you do not hold. It ends by verifying the audit
+chain.
+
 ## Requirements
 
 | Tool | Version | Needed for |

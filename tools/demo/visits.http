@@ -1,0 +1,227 @@
+### Truck Visit Management API — a full visit, end to end
+#
+# Open this file in VS Code (REST Client extension) or Rider and click "Send Request" above each
+# block, top to bottom. It walks one truck through its whole lifecycle, then tries the things that
+# should be refused, and finishes by verifying the audit trail.
+#
+# Setup — two commands:
+#   docker compose up -d postgres
+#   dotnet run --project src/TruckVisit.Api
+#
+# Then issue yourself a token and paste it below:
+#   dotnet user-jwts create --project src/TruckVisit.Api --name operator-1 --claim terminal=DOVER
+#
+# Every request is authenticated. There is no anonymous path into this API other than the health
+# probes, which is the point of the fallback authorization policy.
+
+@host = http://localhost:5080
+@token = PASTE_YOUR_TOKEN_HERE
+
+
+### 1 — Register a visit
+#
+# Note what goes in versus what comes back: "mscu 123 4567" and "34 abc 123" are stored as
+# MSCU1234567 and 34ABC123. Normalisation happens in the value object's constructor, so no
+# endpoint can forget it.
+#
+# The Idempotency-Key is what a gate device would send. Run this request twice: the second time
+# you get 200 instead of 201 and the same visit id, because one arrival must not become two
+# records in an audit trail.
+#
+# @name register
+POST {{host}}/api/visits
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Idempotency-Key: gate-3-20260921-0001
+
+{
+  "terminalId": "dover",
+  "truck": {
+    "unitNumber": "mscu 123 4567",
+    "licensePlate": "34 abc 123"
+  },
+  "driver": {
+    "fullName": "Ada Lovelace",
+    "documentId": "A1234567",
+    "companyName": "Lovelace Haulage Ltd",
+    "phoneNumber": "+905001234567"
+  },
+  "movements": [
+    { "type": "Delivery",   "unitNumber": "MSCU1234567", "from": "depot a", "to": "yard 1" },
+    { "type": "Collection", "unitNumber": "TGHU7654321", "from": "yard 3",  "to": "depot b" }
+  ]
+}
+
+@visitId = {{register.response.body.id}}
+@firstMovementId = {{register.response.body.movements[0].id}}
+@secondMovementId = {{register.response.body.movements[1].id}}
+
+
+### 2 — Try to skip a step: PreRegistered straight to OnSite
+#
+# Expect 409. A truck cannot be on site before it has been processed at the gate, and nothing is
+# written when a transition is refused — check the audit trail afterwards and it is unchanged.
+PATCH {{host}}/api/visits/{{visitId}}/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "status": "OnSite" }
+
+
+### 3 — The truck arrives at the gate
+PATCH {{host}}/api/visits/{{visitId}}/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "status": "AtGate", "reason": "Arrived 20 minutes ahead of slot." }
+
+
+### 4 — Admitted to the yard
+PATCH {{host}}/api/visits/{{visitId}}/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "status": "OnSite" }
+
+
+### 5 — Try to leave with the work undone
+#
+# Expect 409. This is the rule the case does not ask for: a truck does not leave until the work it
+# came for is done. Without it the record could show a completed visit whose cargo was never
+# moved, and nothing in the system would notice.
+PATCH {{host}}/api/visits/{{visitId}}/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "status": "Completed" }
+
+
+### 6 — Record the delivery
+POST {{host}}/api/visits/{{visitId}}/movements/{{firstMovementId}}/completion
+Authorization: Bearer {{token}}
+
+
+### 7 — Record the collection
+#
+# hasOutstandingMovements flips to false in the response once both are done.
+POST {{host}}/api/visits/{{visitId}}/movements/{{secondMovementId}}/completion
+Authorization: Bearer {{token}}
+
+
+### 8 — Now the truck can leave
+PATCH {{host}}/api/visits/{{visitId}}/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "status": "Completed" }
+
+
+### 9 — Try to change a completed visit
+#
+# Expect 409. Completed is terminal.
+PATCH {{host}}/api/visits/{{visitId}}/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "status": "OnSite" }
+
+
+### 10 — Read the visit with its full audit trail
+#
+# Four entries: registration, and the three transitions. Each carries entryHash and previousHash —
+# entry N's previousHash equals entry N-1's entryHash. The hashes are published so an auditor can
+# verify the chain with their own tooling rather than trusting this service's answer.
+GET {{host}}/api/visits/{{visitId}}
+Authorization: Bearer {{token}}
+
+
+### 11 — Verify the audit trail
+#
+# Expect isIntact: true. The interesting case is when it is false — see the integration tests,
+# which disable the database trigger, edit a row directly, re-enable it, and assert that this
+# endpoint still reports exactly where the chain broke.
+GET {{host}}/api/visits/{{visitId}}/audit/verification
+Authorization: Bearer {{token}}
+
+
+### 12 — Search: everything at this terminal
+GET {{host}}/api/visits?terminalId=DOVER&page=1&pageSize=25
+Authorization: Bearer {{token}}
+
+
+### 13 — Search: the gate worklist
+#
+# Trucks on site whose cargo has not been dealt with. This is the query a gate screen polls, and
+# the reason movement completion is modelled at all.
+GET {{host}}/api/visits?terminalId=DOVER&currentStatus=OnSite&hasOutstandingMovements=true
+Authorization: Bearer {{token}}
+
+
+### 14 — Search: by movement origin
+#
+# "yard 1" matches rows stored as YARD1 — the filter is normalised through the same value object
+# the data was written with.
+GET {{host}}/api/visits?terminalId=DOVER&movementFrom=yard 1
+Authorization: Bearer {{token}}
+
+
+### 15 — Search: a terminal you do not hold
+#
+# Expect 403. Not an empty page: to an operator whose token was misconfigured, "no results" reads
+# as "no trucks today", which is a far more dangerous answer than an error.
+GET {{host}}/api/visits?terminalId=HARWICH
+Authorization: Bearer {{token}}
+
+
+### 16 — Read a visit at a terminal you do not hold
+#
+# Expect 404, not 403. Distinguishing the two would turn the endpoint into an oracle: anyone with
+# a valid token could enumerate identifiers and learn which visits exist elsewhere in the network.
+# Use an id from another terminal, or any random guid — the answer is deliberately identical.
+GET {{host}}/api/visits/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{token}}
+
+
+### 17 — Validation: a blank plate
+#
+# Expect 400 with a problem document naming the field. Validation lives in the domain, so the same
+# rule produces the same answer no matter which endpoint the value arrived through.
+POST {{host}}/api/visits
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "terminalId": "DOVER",
+  "truck": { "unitNumber": "MSCU1234567", "licensePlate": "   " },
+  "driver": { "fullName": "Ada Lovelace", "documentId": "A1234567", "companyName": "Lovelace Haulage Ltd" },
+  "movements": [ { "type": "Delivery", "unitNumber": "MSCU1234567", "from": "YARD1", "to": "BERTH3" } ]
+}
+
+
+### 18 — Validation: a visit with no declared work
+#
+# Expect 400. A truck admitted with no recorded purpose is a hole in the gate record.
+POST {{host}}/api/visits
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "terminalId": "DOVER",
+  "truck": { "unitNumber": "MSCU1234567", "licensePlate": "34ABC123" },
+  "driver": { "fullName": "Ada Lovelace", "documentId": "A1234567", "companyName": "Lovelace Haulage Ltd" },
+  "movements": []
+}
+
+
+### 19 — No token at all
+#
+# Expect 401. Endpoints are protected by a fallback policy rather than per-route attributes, so a
+# route added tomorrow is protected by default rather than by the author remembering.
+GET {{host}}/api/visits?terminalId=DOVER
+
+
+### 20 — Health probes (anonymous by design)
+GET {{host}}/health/live
+
+###
+GET {{host}}/health/ready
