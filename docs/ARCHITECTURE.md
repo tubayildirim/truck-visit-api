@@ -327,12 +327,71 @@ across three replicas is 100 req/s each against indexed queries returning ≤200
 single instance's capacity. PostgreSQL sees a negligible write rate and an indexed read rate it
 handles on modest hardware.
 
+### Measured, not estimated
+
+The paragraph above is arithmetic. `tools/capacity/seed.sql` and `tools/capacity/explain.sql` exist
+so it doesn't have to be taken on trust: the seed builds 1,000,000 visits — about 2% of the ~51
+million seven-year estimate two sections down — with 1,000,000 movements and 3,000,000 audit
+entries (1526 MB total), deliberately pessimistic: random UUID keys rather than the time-ordered
+ones the application actually generates, and no skew across terminal or status. `explain.sql` then
+runs the seven query shapes the API issues, with `EXPLAIN (ANALYZE, BUFFERS)`. Full output is
+committed nowhere on purpose — it's a thousand lines of query plan — but here is every number from
+it:
+
+| # | Query | Plan | Execution time |
+|---|---|---|---|
+| 1 | Dominant query: one terminal, one status, recent-first | Index Scan Backward, `ix_visits_terminal_status_created` | **1.06 ms** |
+| 2 | The paging count that accompanies it | Index Only Scan, same index | **60.3 ms** |
+| 3 | One terminal, a date window | Index Scan Backward, `ix_visits_terminal_created` | **0.53 ms** |
+| 4 | `movementFrom` filter | Nested Loop Semi Join — see below | **13.5 ms** |
+| 5 | Gate worklist (`hasOutstandingMovements`) | Nested Loop Semi Join — see below | **3.4 ms** |
+| 6 | One visit's full audit trail | Index Scan, `IX_visit_status_history_VisitId_Sequence` | **0.55 ms** |
+| 7 | Page 2000 of query 1 (offset 50,000) | Same index as #1, re-sorting every skipped row | **77.1 ms** |
+
+Query 1 confirms the design directly — the planner seeks the composite index instead of scanning,
+and the whole request, planning included, lands under 2 ms against a million rows.
+
+**Queries 4 and 5 did not use the indexes built for them, and that's the planner doing its job.**
+`IX_visit_movements_From` and the partial index on `visit_movements(CompletedAt)` both exist and are
+real, but at CALAIS's and ROSTOCK's actual selectivity in this seed — 88 and 26 matching visits out
+of a million — it's cheaper to narrow by terminal first, using an index the planner already trusts,
+and then probe `visit_movements` once per visit through the `VisitId` foreign-key index, filtering
+`From` or `CompletedAt` in memory. That's real work done 88 or 26 times, not a scan wearing a
+disguise — `Rows Removed by Filter` stays at 0 or 1 per iteration, and the whole thing still costs
+single-digit-to-teens of milliseconds. A dedicated index is insurance for the terminal that *isn't*
+selective, not a guarantee it fires on every call; worth re-checking once real traffic accumulates,
+since a terminal carrying proportionally more volume could tip the plan back the other way.
+
+**Query 2 turns "offset pagination is expensive" into a number instead of a claim.** Even as an
+index-only scan with zero heap fetches, counting 50,000 matching rows costs 60 ms — 57× query 1's
+cost — because a total count has to visit every matching entry, not just the first 25 the response
+actually returns.
+
+**Query 7 makes the same argument from the other direction.** Reaching page 2000 by skipping 50,000
+rows costs 77 ms against query 1's 1 ms at comparable selectivity: a 73× difference for changing one
+number in the request. Keyset pagination on `(CreatedTime, Id)` — already indexed, already the sort
+order used — replaces that cost with a seek regardless of page depth; it isn't built yet only because
+the case's stated volumes don't demand it (see "Next bottlenecks" below).
+
+**Query 6 carries one artifact of the test harness, not the application.** It locates *some* DOVER
+visit with `WHERE "TerminalId" = 'DOVER' LIMIT 1`, which the planner satisfies with a partial
+sequential scan (5 rows touched) for lack of anything to seek against. The real detail endpoint
+receives the id directly and never runs that subquery — only the indexed lookup on
+`visit_status_history` that follows it, which is the half that matters and performed exactly as
+designed.
+
+Total index footprint at 1,000,000 visits: **~590 MB** across fourteen indexes
+(`pg_stat_user_indexes`), against 1526 MB of table and index data combined. Most of those indexes
+report `scans: 0` in that same view — this single run exercises each query shape exactly once, so
+that column says nothing about which indexes matter under real traffic.
+
 **Next bottlenecks, in the order they will arrive:**
 
 1. **Read volume on the primary.** Add RDS read replicas and route search to them. Search is already
    `AsNoTracking()` and projection-only, so this is a connection-string change, not a redesign.
-2. **Deep pagination.** Offset paging degrades at high page numbers. The fix is keyset pagination on
-   `(CreatedTime, Id)` — both already indexed and already the sort order.
+2. **Deep pagination.** Offset paging degrades at high page numbers — measured at 73× slower by page
+   2000 above (§9, query 7). The fix is keyset pagination on `(CreatedTime, Id)` — both already
+   indexed and already the sort order.
 3. **Table size.** Monthly partitioning on `CreatedTime`, as in §6.
 4. **Full-text / fuzzy search.** If operators need "plate starts with 34AB" or cross-field relevance
    ranking, relational `LIKE` stops being appropriate. At that point project a read model into

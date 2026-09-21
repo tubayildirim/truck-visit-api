@@ -238,7 +238,11 @@ fragmented than production, and every terminal and status equally weighted so no
 unusually selective. `explain.sql` then runs seven queries that mirror what the application issues,
 including a deliberately deep page to measure the cost of offset pagination rather than hide it.
 
-Results are in [ARCHITECTURE §9](docs/ARCHITECTURE.md#9-scalability).
+Headline result: the dominant query runs in ~1 ms against a million seeded visits, and offset
+pagination costs 73× more by page 2000 than page 1 — the concrete case for the keyset pagination
+already on the roadmap. Full numbers and the two surprises in the plan (two filters skip the index
+built for them, and the planner is right to) are in
+[ARCHITECTURE §9](docs/ARCHITECTURE.md#9-scalability).
 
 > Seeded audit hashes are synthetic and will not verify — those rows exist to give the planner
 > volume, not to exercise the audit chain. Verify the chain against data written through the API.
