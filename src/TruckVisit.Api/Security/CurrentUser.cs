@@ -34,6 +34,8 @@ internal sealed class CurrentUser(IHttpContextAccessor httpContextAccessor) : IC
 
     private IReadOnlySet<string>? _terminalIds;
 
+    public bool IsAuthenticated => Principal?.Identity?.IsAuthenticated == true;
+
     public string UserId =>
         Principal?.FindFirstValue("sub")
         ?? Principal?.FindFirstValue(ClaimTypes.NameIdentifier)

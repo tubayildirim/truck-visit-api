@@ -65,6 +65,8 @@ internal sealed class FakeIdempotencyStore : IIdempotencyStore
 
 internal sealed class FakeCurrentUser(string userId, params string[] terminals) : ICurrentUser
 {
+    public bool IsAuthenticated { get; init; } = true;
+
     public string UserId { get; } = userId;
 
     public IReadOnlySet<string> TerminalIds { get; } =

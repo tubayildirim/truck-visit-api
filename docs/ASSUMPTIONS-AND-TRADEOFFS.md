@@ -246,22 +246,17 @@ These are absent deliberately, with the reasoning recorded rather than discovere
 
 **Genuinely missing:**
 
-6. **Integration tests are thinner than they should be.** Domain rules are covered thoroughly
-   (67 tests); persistence, authorization and the append-only guarantee are covered at the
-   integration level only where they were cheapest to assert. Given more time the priority would be
-   a Testcontainers suite proving that the database-level `REVOKE` actually refuses an `UPDATE`.
-7. **No CI pipeline.** The Dockerfile runs the unit tests during image build, which covers the worst
-   case, but there is no workflow file running the full suite, the analyzers and the vulnerability
-   audit on every push.
-8. **No API versioning.** There is one consumer today. The moment there are two, `/api/v1/` and a
+6. **No API versioning.** There is one consumer today. The moment there are two, `/api/v1/` and a
    deprecation policy are needed before the first breaking change, not after.
-9. **No load test.** The capacity analysis in the architecture document is arithmetic, not
-   measurement. Before production it should be validated against a seeded 50-million-row database —
-   that is where index assumptions usually turn out to be wrong.
-10. **No OTLP exporter wired.** Metrics and traces are emitted through the standard .NET APIs, so
-    collection is a configuration step, but no collector endpoint is configured here.
-11. **Movement count is a correlated subquery** in the search projection. Fine at page size 25;
-    denormalise it onto `visits` if it ever shows up in a query plan.
+7. **No OTLP exporter wired.** Metrics and traces are emitted through the standard .NET APIs, so
+   collection is a configuration step, but no collector endpoint is configured here.
+8. **Movement count is a correlated subquery** in the search projection. Fine at page size 25;
+   denormalise it onto `visits` if it ever shows up in a query plan.
+
+> `.github/workflows/ci.yml` and the measured query plans in
+> [ARCHITECTURE §9](ARCHITECTURE.md#9-scalability) close what used to be listed here as missing CI
+> and an unmeasured capacity claim; the rest of this section still needs a pass to catch up with
+> that (tracked separately).
 
 ---
 

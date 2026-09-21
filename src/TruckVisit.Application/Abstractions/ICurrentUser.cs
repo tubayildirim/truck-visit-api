@@ -11,6 +11,14 @@ namespace TruckVisit.Application.Abstractions;
 /// </remarks>
 public interface ICurrentUser
 {
+    /// <summary>
+    /// Whether this unit of work is acting on behalf of an authenticated caller at all. False for
+    /// every code path that runs outside a real request — migrations, the development-only
+    /// auto-migrate at start-up, a background job — which is exactly the distinction the
+    /// persistence layer needs to know whether to narrow itself to a caller's scope or not.
+    /// </summary>
+    bool IsAuthenticated { get; }
+
     /// <summary>Stable identifier of the principal, recorded in the audit trail.</summary>
     string UserId { get; }
 

@@ -254,6 +254,62 @@ told there are no trucks at their own terminal.
 reasons about authorization. An empty terminal scope is handled explicitly and returns an empty
 page — never all rows.
 
+### A second, independent gate: PostgreSQL row-level security
+
+The paragraph above is one gate, and it only holds for connections that go through this codebase.
+The `TenantIsolationWithRowLevelSecurity` migration adds the other one, directly in the database, on
+the same reasoning the append-only trigger already argues for immutability (ADR-003): a guarantee
+that depends on application code remembering to apply a filter is not a guarantee.
+
+- **A restricted runtime role.** `truckvisit_app` is `NOLOGIN` — nothing ever connects as it
+  directly. `TruckVisitDbContext` always authenticates as the schema's owning role, because
+  migrations need that role's DDL privileges, and `TenantScopeConnectionInterceptor` switches every
+  connection opened for an authenticated caller into `truckvisit_app` with `SET ROLE`, immediately
+  after telling the session which terminals that caller may see. Row-level security exempts a
+  table's owner by default; the owning role never runs application queries, only DDL, so the
+  exemption never matters for the traffic RLS exists to constrain.
+- **Two session variables the policies read back.** `app.current_terminals` (comma-joined — a
+  `TerminalCode`'s charset excludes the delimiter, so no claim can smuggle a second one in) and
+  `app.terminals_all_scope`, for the same cross-terminal auditor case `HasGlobalTerminalAccess`
+  already covers at the application layer.
+- **Fails closed.** The policies read those variables with `current_setting(..., true)`, which
+  returns `NULL` instead of raising when a session never set them — a raw psql session, a
+  migration, a background job. `NULL` compared against anything is `NULL`, not `TRUE`, so a
+  connection that never opts into a scope sees nothing, never everything.
+- **`FORCE ROW LEVEL SECURITY`** on all three tables, so the one operational mistake that would
+  otherwise defeat this — the owning connection being reused directly, without ever switching role
+  — is bound by the same policies too, rather than silently exempt.
+- **State is re-established on every connection open, never assumed to survive from the last one.**
+  Two reasons, either sufficient alone: Npgsql pools physical connections, and nothing guarantees a
+  role switch or a session variable survives being handed back out; and one physical connection
+  legitimately serves different callers over its life — an operator, then the anonymous health
+  check, then perhaps a background scope with none. Whichever this open is for, its state is set
+  fresh, never inherited (`TenantScopeConnectionInterceptor`).
+- **Privileges, not just visibility.** `truckvisit_app` is granted no `DELETE` on `visits` or
+  `visit_movements` — nothing in the application deletes either — and no `UPDATE` or `DELETE` at
+  all on `visit_status_history`. That is the same guarantee the append-only trigger gives,
+  enforced twice, and it is what finally makes the "REVOKE is applied to the application role in
+  production" line further up literally true rather than aspirational, closing a gap this
+  document used to list as missing (`TenantIsolationTests`, proceeding the same way
+  `AuditTamperDetectionTests` proves the trigger: assume every application-layer guard is absent,
+  and show the database refuses anyway).
+- **A write behaves exactly like a read that finds nothing.** A targeted `UPDATE` against a row
+  outside the caller's scope is permitted by grant, and touches zero rows — indistinguishable from
+  targeting a row that does not exist at all. That is the same 404-not-403 choice already made for
+  reads (below), arrived at independently, because it is how PostgreSQL's row security behaves by
+  default rather than something this codebase had to build.
+
+`idempotency_records` deliberately carries no policy — a replayed request is deduplicated by
+`(Key, UserId)`, not by terminal, and the table carries no `TerminalId` to scope by.
+
+One sharp edge, documented rather than discovered later: `FORCE` means the owning role is bound by
+these policies too, so an owner-role connection that ever queried `visits` directly — nothing in
+this codebase does today — would see zero rows rather than every row, because its session set no
+scope and the policy fails closed. And the migration grants role membership to a role literally
+named `truckvisit`, which matches local development; a production database whose migration-owner
+role has a different name needs the equivalent `GRANT truckvisit_app TO <that role>;` run once,
+by hand, alongside the migration.
+
 **404 vs 403.** A visit at an invisible terminal is reported as missing. Returning 403 would make
 the endpoint an oracle: anyone with a token could enumerate identifiers and learn which visits exist
 at terminals they have no right to know about. Writes return 403, where hiding existence buys
@@ -452,6 +508,7 @@ own schema races itself the moment it runs more than one replica, which this one
 | ADR-010 | Optimistic concurrency via `xmin` | Free in PostgreSQL; correct for a low-contention write path |
 | ADR-011 | `Idempotency-Key` on create | Gate hardware retries; one arrival must not become three records |
 | ADR-012 | Security advisories fail the build | A gate that warns is a gate that is ignored |
+| ADR-013 | Tenant isolation enforced twice: application filter and PostgreSQL RLS | App-layer filtering alone trusts every future query to remember it |
 
 Full reasoning, alternatives considered and limitations accepted:
 [ASSUMPTIONS-AND-TRADEOFFS.md](ASSUMPTIONS-AND-TRADEOFFS.md).

@@ -15,7 +15,8 @@ public static class InfrastructureServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-        services.AddDbContext<TruckVisitDbContext>(options =>
+        services.AddDbContext<TruckVisitDbContext>((serviceProvider, options) =>
+        {
             options.UseNpgsql(connectionString, npgsql =>
             {
                 // RDS fails over, and a multi-AZ failover is a few seconds of refused connections.
@@ -27,7 +28,13 @@ public static class InfrastructureServiceCollectionExtensions
                     errorCodesToAdd: null);
 
                 npgsql.CommandTimeout((int)TimeSpan.FromSeconds(30).TotalSeconds);
-            }));
+            });
+
+            // Resolved from the request's own scope, not a singleton: the interceptor has to see
+            // *this* request's caller, and ICurrentUser is itself scoped to the HTTP context.
+            options.AddInterceptors(
+                new TenantScopeConnectionInterceptor(serviceProvider.GetRequiredService<ICurrentUser>()));
+        });
 
         services.AddScoped<IVisitRepository, VisitRepository>();
         services.AddScoped<IIdempotencyStore, IdempotencyStore>();
