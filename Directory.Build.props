@@ -16,7 +16,15 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
 
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
-    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!--
+      InvariantGlobalization is deliberately NOT enabled. Flipping that switch would mask the
+      culture problem rather than solve it: the code would still be calling culture-sensitive
+      overloads, and would start corrupting data the day someone turned the switch off or ran a
+      component that needs real culture data. Correctness is enforced at each call site instead —
+      ToUpperInvariant, explicit StringComparison — with CA1304/CA1305/CA1310 as build errors, and
+      a test that runs under tr-TR to prove it.
+    -->
   </PropertyGroup>
 
 </Project>

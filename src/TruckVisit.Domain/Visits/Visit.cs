@@ -73,10 +73,12 @@ public sealed class Visit
 
     public Driver Driver { get; private set; }
 
-    public IReadOnlyList<Movement> Movements => _movements;
+    // AsReadOnly rather than returning the list behind an IReadOnlyList: the interface alone can
+    // be cast back to List<T> and mutated, which would be a way around every rule in this class.
+    public IReadOnlyList<Movement> Movements => _movements.AsReadOnly();
 
     /// <summary>The complete, append-only audit trail, ordered oldest first.</summary>
-    public IReadOnlyList<StatusChange> StatusHistory => _statusHistory;
+    public IReadOnlyList<StatusChange> StatusHistory => _statusHistory.AsReadOnly();
 
     public DateTimeOffset CreatedTime { get; private set; }
 
