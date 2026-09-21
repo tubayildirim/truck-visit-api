@@ -214,6 +214,30 @@ curl "$API/health/ready"   # database reachable — gates load-balancer membersh
 
 ---
 
+## Checking the capacity claim
+
+The architecture document estimates ~51 million visits over the seven-year retention period and
+argues that correct indexes, not sharding, are what that demands. That is arithmetic, so the repo
+ships the means to check it against a query planner:
+
+```bash
+docker compose up -d postgres
+dotnet ef database update --project src/TruckVisit.Infrastructure --startup-project src/TruckVisit.Api
+docker compose exec -T postgres psql -U truckvisit -d truckvisit -f - < tools/capacity/seed.sql
+docker compose exec -T postgres psql -U truckvisit -d truckvisit -f - < tools/capacity/explain.sql
+```
+
+The seed builds a million visits with their movements and audit trails, deliberately pessimistic:
+random UUIDs rather than the time-ordered v7 keys the application generates, so the index is more
+fragmented than production, and every terminal and status equally weighted so no filter is
+unusually selective. `explain.sql` then runs seven queries that mirror what the application issues,
+including a deliberately deep page to measure the cost of offset pagination rather than hide it.
+
+Results are in [ARCHITECTURE §9](docs/ARCHITECTURE.md#9-scalability).
+
+> Seeded audit hashes are synthetic and will not verify — those rows exist to give the planner
+> volume, not to exercise the audit chain. Verify the chain against data written through the API.
+
 ## Running the tests
 
 ```bash

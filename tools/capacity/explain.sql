@@ -15,6 +15,9 @@
 -- =============================================================================================
 
 \timing on
+-- Stop at the first error rather than printing six more pages of cascading failures: if the
+-- schema or the seed is missing, the first query says so and that is the useful message.
+\set ON_ERROR_STOP on
 
 \echo
 \echo '=== 1. The dominant query: one terminal, one status, most recent first ==================='

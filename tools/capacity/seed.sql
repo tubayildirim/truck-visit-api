@@ -18,7 +18,11 @@
 -- meant to — they exist to give the planner realistic volume and column widths. Verify the audit
 -- chain against data written through the API.
 --
--- Usage:
+-- Usage — the schema has to exist first. The integration tests run against their own throwaway
+-- Testcontainers instance and never touch this database, so a fresh compose stack is empty:
+--
+--   docker compose up -d postgres
+--   dotnet ef database update --project src/TruckVisit.Infrastructure --startup-project src/TruckVisit.Api
 --   docker compose exec -T postgres psql -U truckvisit -d truckvisit -f - < tools/capacity/seed.sql
 -- =============================================================================================
 
