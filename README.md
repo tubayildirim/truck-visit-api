@@ -7,6 +7,7 @@ them through their lifecycle, and retains every status change as an immutable au
 |---|---|
 | **Architecture** | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | **Assumptions & trade-offs** | [docs/ASSUMPTIONS-AND-TRADEOFFS.md](docs/ASSUMPTIONS-AND-TRADEOFFS.md) |
+| **Acceptance criteria, mapped** | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) |
 
 ---
 
