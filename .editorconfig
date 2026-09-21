@@ -37,6 +37,14 @@ dotnet_diagnostic.CA1304.severity = error
 dotnet_diagnostic.CA1305.severity = error
 dotnet_diagnostic.CA1310.severity = error
 
+# EF Core writes these files, and they are regenerated on every model change. Holding generated
+# output to hand-written style rules means either editing a file the tool will overwrite, or
+# suppressing rules one by one forever. Marking it as generated is the honest answer: the analyzer
+# set still applies in full to every line a person actually writes.
+[**/Migrations/*.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none
+
 # Naming: private fields _camelCase
 dotnet_naming_rule.private_fields_underscore.symbols = private_fields
 dotnet_naming_rule.private_fields_underscore.style = underscore_camel
