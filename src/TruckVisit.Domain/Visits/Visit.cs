@@ -3,29 +3,17 @@ using TruckVisit.Domain.Common;
 namespace TruckVisit.Domain.Visits;
 
 /// <summary>
-/// A single truck visit to a terminal: the aggregate root and the only entry point for changing
-/// anything about a visit.
+/// Aggregate root for a truck visit. All state changes go through methods on this class —
+/// no public setters, no direct list access — so the audit trail has exactly one write path.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Every mutation goes through a method on this class. Collections are exposed as read-only views
-/// over private lists, and there is no public setter anywhere, so no caller — service, controller
-/// or mapper — can put a visit into a state the rules forbid. That is what makes the audit
-/// guarantee trustworthy: there is exactly one code path that can append to the history, and it
-/// cannot run without first validating the transition.
-/// </para>
-/// <para>
-/// <see cref="CurrentStatus"/> duplicates information already present in the history. That
-/// denormalisation is deliberate (ADR-006): the search endpoint filters on current status at up to
-/// 300 requests per second, and resolving it per row from the history table would turn every query
-/// into an aggregation over the largest table in the system. The duplicate is safe because both
-/// values are written inside <see cref="ChangeStatus"/>, in one transaction.
-/// </para>
+/// <see cref="CurrentStatus"/> is intentionally denormalised from the history (ADR-006):
+/// deriving it per row at 300 req/s would aggregate the largest table in the system on the
+/// hot search path. Both fields are updated together in <see cref="ChangeStatus"/>.
 /// </remarks>
 public sealed class Visit
 {
-    /// <summary>Upper bound on movements per visit — a truck is physically limited, and an
-    /// unbounded list is a denial-of-service vector on the create endpoint.</summary>
+    /// <summary>Hard cap on movements per visit. Keeps the create payload bounded.</summary>
     public const int MaxMovements = 50;
 
     public const int MaxActorLength = 128;
@@ -49,9 +37,8 @@ public sealed class Visit
         string createdBy,
         DateTimeOffset createdTime)
     {
-        // A version 7 GUID is time-ordered. Random v4 keys scatter inserts across a 51-million-row
-        // clustered index and fragment it; v7 keeps them append-friendly while staying opaque to
-        // clients, unlike a sequential integer which would leak volume.
+        // v7: time-ordered, so inserts are append-friendly on the clustered index.
+        // Opaque to callers — a sequential int would leak volume.
         Id = Guid.CreateVersion7(createdTime);
         TerminalId = terminalId;
         Truck = truck;
@@ -73,8 +60,8 @@ public sealed class Visit
 
     public Driver Driver { get; private set; }
 
-    // AsReadOnly rather than returning the list behind an IReadOnlyList: the interface alone can
-    // be cast back to List<T> and mutated, which would be a way around every rule in this class.
+    // AsReadOnly, not IReadOnlyList<T>: callers can cast the interface back to List<T> and bypass
+    // the aggregate's rules. AsReadOnly() returns a wrapper that refuses the cast.
     public IReadOnlyList<Movement> Movements => _movements.AsReadOnly();
 
     /// <summary>The complete, append-only audit trail, ordered oldest first.</summary>
@@ -86,11 +73,9 @@ public sealed class Visit
     public string CreatedBy { get; private set; }
 
     /// <summary>
-    /// Timestamp of the most recent audit entry. Kept as stored state, for the same reason
-    /// <see cref="CurrentStatus"/> is: the search projection sorts and displays it on the hot path,
-    /// and deriving it would mean a correlated MAX() over the history table for every row returned.
-    /// It also gives <see cref="ChangeStatus"/> a monotonicity check that does not depend on the
-    /// history collection having been loaded.
+    /// Timestamp of the most recent status change. Stored redundantly (same reason as
+    /// <see cref="CurrentStatus"/>) and used by <see cref="ChangeStatus"/> to enforce monotonicity
+    /// without requiring the history collection to be loaded.
     /// </summary>
     public DateTimeOffset LastStatusChangedAt { get; private set; }
 
@@ -165,9 +150,8 @@ public sealed class Visit
 
         if (target == CurrentStatus)
         {
-            // Rejected rather than ignored: a silent no-op would let a duplicated gate signal look
-            // like it succeeded, and writing the entry anyway would pad the audit trail with events
-            // that never happened.
+            // Rejected, not silently ignored: a duplicate gate signal should not look like success,
+            // and a no-op entry in the audit trail would record something that never happened.
             throw new InvalidStatusTransitionException(
                 $"Visit is already in status '{CurrentStatus}'.",
                 CurrentStatus.ToString(),
@@ -190,9 +174,8 @@ public sealed class Visit
 
         if (target == VisitStatus.Completed && HasOutstandingMovements)
         {
-            // A truck does not leave until the work it came for is done. Without this the record
-            // would happily show a completed visit whose cargo was never moved, and the gate would
-            // have no way to notice — the two halves of a visit would drift apart silently.
+            // Completing a visit with outstanding movements would leave cargo recorded as moved
+            // when it wasn't. ADR-014 covers why this is a lifecycle gate rather than a warning.
             var outstanding = _movements.Count(movement => !movement.IsCompleted);
 
             throw new InvalidStatusTransitionException(
@@ -204,8 +187,7 @@ public sealed class Visit
 
         if (occurredAt < LastStatusChangedAt)
         {
-            // An audit trail that can go backwards in time is not an audit trail. This guards
-            // against a caller-supplied timestamp or a clock that has been stepped back.
+            // Guards against a stepped-back clock or a caller-supplied timestamp.
             throw new DomainValidationException(
                 "occurredAt",
                 $"A status change cannot pre-date the previous entry ({LastStatusChangedAt:O}).");
@@ -230,13 +212,12 @@ public sealed class Visit
     }
 
     /// <summary>
-    /// Records that a declared collection or delivery has actually been carried out.
+    /// Records that a declared movement has been carried out. Only allowed while the visit is
+    /// <see cref="VisitStatus.OnSite"/>.
     /// </summary>
     /// <remarks>
-    /// Deliberately does not append to <see cref="StatusHistory"/>. That trail is about the
-    /// visit's status, and mixing a second kind of event into it would make "the fourth entry" mean
-    /// two different things to an auditor. A movement carries its own completion timestamp and
-    /// actor, which is its audit record.
+    /// Does not write to <see cref="StatusHistory"/> — that trail is for visit-level status changes.
+    /// Movements carry their own completion timestamp and actor.
     /// </remarks>
     /// <exception cref="InvalidStatusTransitionException">The truck is not on site.</exception>
     /// <exception cref="DomainValidationException">The movement is unknown or already completed.</exception>
@@ -272,13 +253,12 @@ public sealed class Visit
     }
 
     /// <summary>
-    /// Walks the audit trail and checks that every entry still hashes to its stored digest and
-    /// links to the entry before it.
+    /// Verifies the hash chain: every entry rehashes to its stored digest and links correctly to
+    /// the previous one. Returns the first break found, or <see cref="AuditVerification.Intact"/>.
     /// </summary>
     /// <remarks>
-    /// This is the detection half of the audit guarantee. The type system and the database trigger
-    /// prevent an edit; this reports whether one happened anyway — which is the question a
-    /// regulator actually asks. It needs no reference copy: the chain carries its own proof.
+    /// Prevention (type system + DB trigger) and detection (this method) are separate guarantees.
+    /// The chain doesn't need an external reference copy — a break is self-evident.
     /// </remarks>
     public AuditVerification VerifyAuditTrail()
     {
@@ -292,8 +272,7 @@ public sealed class Visit
 
             if (entry.Sequence != index + 1)
             {
-                // A gap or a duplicate means an entry was removed or inserted, which the unique
-                // index should have prevented — so finding one here is itself the finding.
+                // Gap or duplicate — the unique index should have caught this at write time.
                 return AuditVerification.Broken(
                     ordered.Length,
                     entry.Sequence,
@@ -326,8 +305,8 @@ public sealed class Visit
     {
         if (movements.Count == 0)
         {
-            // A visit exists in order to collect or deliver something. Allowing an empty list would
-            // let the gate admit a truck with no recorded purpose — see the assumptions document.
+            // A truck must have a declared purpose — an empty list would register the arrival
+            // with no record of what was collected or delivered (assumption A5).
             throw new DomainValidationException(
                 "movements",
                 "A visit must declare at least one collection or delivery.");

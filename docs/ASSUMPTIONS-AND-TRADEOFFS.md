@@ -218,16 +218,24 @@ busiest.
 
 ## 3. Trade-offs accepted
 
-| Trade-off | Accepted | Cost | Why it is the right call *now* |
-|---|---|---|---|
-| **Simplicity vs scale** | Modular monolith | Cannot scale modules independently | The write path is 0.23/s; boundaries are enforced so extraction stays cheap |
-| **Offset vs keyset pagination** | Offset | Degrades at deep page numbers | Operators page through recent arrivals, not a seven-year archive; the sort key is already indexed for the switch |
-| **Normalised vs denormalised** | `CurrentStatus` and `LastStatusChangedAt` duplicated on `visits` | Two writes must stay consistent | Both are written inside one method in one transaction; the alternative is aggregating the largest table on the hot path |
-| **Relational search vs Elasticsearch** | Indexed SQL | No fuzzy or cross-field relevance | Nothing asks for it; a search cluster doubles the operational surface. Migration path documented |
-| **Correctness vs throughput on writes** | Optimistic concurrency, 409 on conflict | Clients must handle retry | Conflicts are rare and a lost status update is worse than a retry |
-| **Strong vs shared tenancy** | Shared schema, row scoping | Not physical isolation | Matches the stated requirement; `TerminalId` is already the natural shard key if that changes |
-| **Read model purity** | Repository returns projections for search, aggregates for writes | Two shapes behind one port | Materialising full aggregates per list row reads an order of magnitude more than the list displays |
-| **Build strictness vs friction** | Warnings as errors, analyzers on | Occasional build breaks on style | Every one of them was a real signal during development, including the three CVEs |
+**Modular monolith over microservices.** The write rate is 0.23/s and there's one bounded context.
+Splitting would add network hops and deployment complexity without removing a line of business logic.
+Module boundaries are enforced in code, so if a second context appears, extraction is a refactor.
+
+**Offset pagination over keyset.** Operators work from recent arrivals, so deep pages are rare in
+practice. Query 7 in the capacity test shows this costs 77 ms at page 2000 vs 1 ms at page 1 —
+worth fixing, not urgent. Sort key is already indexed for the switch when the time comes.
+
+**Denormalised `CurrentStatus` / `LastStatusChangedAt`.** These are written twice: on `visits` and
+derived from `visit_status_history`. The inconsistency risk is contained — both writes happen inside
+one method in one transaction. The alternative is aggregating the largest table on the search hot path.
+
+| Trade-off | Accepted | Cost |
+|---|---|---|
+| **Relational search vs Elasticsearch** | Indexed SQL | No fuzzy or cross-field relevance. Migration path documented. |
+| **Optimistic concurrency** | 409 on conflict, clients retry | Conflicts are rare; a lost status update is worse than a retry |
+| **Shared tenancy** | Shared schema, row scoping | Not physical isolation. `TerminalId` is the natural shard key if isolation requirements change. |
+| **Build strictness** | Warnings as errors, full analyzers | Occasional build breaks on style. Every alert during development was a real signal, including three CVEs. |
 
 ---
 

@@ -137,8 +137,8 @@ also a correctness guard — see §7.
 | `GET` | `/health/live`, `/health/ready` | 200 | Anonymous |
 
 **Errors** are RFC 9457 `application/problem+json`, produced in exactly one place
-(`GlobalExceptionHandler`). Endpoints contain no `try`/`catch` and no validation, so the same rule
-violation cannot return 400 from one route and 500 from another.
+(`GlobalExceptionHandler`). Endpoints contain no `try`/`catch` and no validation, so the same
+rule violation returns the same status code regardless of which route triggered it.
 
 | Condition | Status |
 |---|---|
@@ -148,12 +148,11 @@ violation cannot return 400 from one route and 500 from another.
 | Illegal transition, or concurrent modification | 409 |
 | Anything unrecognised | 500, no detail |
 
-**Replay returns 200, not 201.** A client retrying over a flaky link needs to distinguish "I
-created this" from "this already existed"; returning 201 twice hides a real failure mode.
+**Replay returns 200, not 201.** A retrying client needs to distinguish "created" from
+"already existed"; returning 201 twice hides the difference.
 
-**Search returns summaries, not full aggregates.** A list view needs current state, not every
-transition that led to it. Returning history would multiply rows read per page by trail length —
-on the busiest endpoint in the system.
+**Search returns summaries, not full aggregates.** A list view needs current state. Returning
+the full history per row would multiply reads by trail length on the busiest endpoint.
 
 ---
 
@@ -181,14 +180,13 @@ this enum.
 1. **Type level.** `StatusChange` exposes no setter and no mutating method. A unit test asserts
    this by reflection, so adding one fails the build.
 2. **Persistence level.** `SaveChanges` inspects the change tracker and throws if any audit entry
-   is `Modified` or `Deleted` — catching attached graphs and bulk operations that bypass the model.
+   is `Modified` or `Deleted` — catching bulk operations that bypass the model.
 3. **Database level.** The migration installs a `BEFORE UPDATE OR DELETE` trigger on
-   `visit_status_history` that raises an exception, so a direct SQL statement is refused too. A
-   trigger rather than a `REVOKE`, because `REVOKE` does not constrain a superuser and the owning
-   role usually is one — the guarantee has to hold for every connection, not just the polite ones.
-   `REVOKE` is still applied to the application role in production as a second layer.
+   `visit_status_history`, so direct SQL is refused too. A trigger rather than a `REVOKE`
+   because `REVOKE` doesn't constrain a superuser connection. `REVOKE` is still applied to the
+   application role as a second layer.
 
-Defence in depth is warranted here because this table is what a regulatory audit actually inspects.
+Three layers are warranted because this table is what a regulatory audit actually inspects.
 
 ### Indexes
 
@@ -239,16 +237,15 @@ Seven years of history is a lifecycle problem, and the plan is documented rather
 ## 7. Security model
 
 **Authentication.** OAuth2 / JWT Bearer. Settings bind from `Authentication:Schemes:Bearer`, which
-is also where `dotnet user-jwts` writes — local development therefore uses **real, signed tokens**
-and the pipeline contains no developer-only bypass, which is the shortcut that quietly ships.
+is also where `dotnet user-jwts` writes — local development uses real, signed tokens with no
+developer-only bypass in the pipeline.
 
 **Authorization.** A fallback policy requires an authenticated user on every endpoint, so a route
-added later is protected by default rather than by the author remembering. Terminal access comes
-from `terminal` claims; `scope=terminals.all` grants cross-terminal read for auditors.
+added later is protected by default. Terminal access comes from `terminal` claims;
+`scope=terminals.all` grants cross-terminal read for auditors.
 
 Claims pass through the same `TerminalCode` value object as stored data. Without that, a token
-issued as `"dover "` would silently fail to match rows saved as `"DOVER"`, and an operator would be
-told there are no trucks at their own terminal.
+issued as `"dover "` would silently fail to match rows saved as `"DOVER"`.
 
 **Row scoping is resolved in the application layer**, before the repository, which therefore never
 reasons about authorization. An empty terminal scope is handled explicitly and returns an empty
@@ -316,7 +313,7 @@ at terminals they have no right to know about. Writes return 403, where hiding e
 nothing.
 
 **`createdBy` is never taken from the request body.** It comes from the authenticated principal's
-`sub` claim. An audit trail attributed by the caller is not an audit trail.
+`sub` claim. An audit trail attributed by the caller isn't an audit trail.
 
 **Transport and headers.** HSTS and HTTPS redirection outside Development; `X-Content-Type-Options`,
 `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, a `default-src 'none'` CSP, a restrictive
@@ -326,7 +323,6 @@ nothing.
 the environment, wired to AWS Secrets Manager in a cluster. Start-up fails fast if absent.
 
 **Error bodies leak nothing.** Unrecognised exceptions return a fixed message and a correlation id.
-An exception message can name a table, a column, a host, or a connection string.
 
 ### Supply chain
 

@@ -6,29 +6,21 @@ using TruckVisit.Domain.Common;
 namespace TruckVisit.Domain.Visits;
 
 /// <summary>
-/// One immutable entry in a visit's audit trail.
+/// One immutable entry in a visit's status audit trail.
 /// </summary>
 /// <remarks>
+/// No public setter, no mutating member, internal constructor only reachable from
+/// <see cref="Visit"/>. Immutability is structural, not conventional (ADR-003).
 /// <para>
-/// Every property is publicly read-only and can only be set through the internal constructor,
-/// which only <see cref="Visit"/> can reach. There is deliberately no method to edit or delete an
-/// entry: "all status transitions must be retained as an immutable audit history" is enforced by
-/// the shape of the type, not by a convention someone has to remember (ADR-003).
+/// <see cref="Sequence"/> gives the trail a total order that cannot tie: two changes can share
+/// a millisecond, and clocks can be stepped back.
 /// </para>
 /// <para>
-/// <see cref="Sequence"/> exists because timestamps are not a safe ordering key: two changes can
-/// share a millisecond, and clocks move. The sequence is assigned by the aggregate and gives the
-/// auditor a total order that cannot tie.
-/// </para>
-/// <para>
-/// <b>Hash chaining (ADR-013).</b> Each entry stores the hash of its own contents combined with the
-/// previous entry's hash, so the trail is a chain rather than a pile of independent rows. The
-/// database trigger and the application guard both *prevent* tampering; neither can *detect* it if
-/// prevention is circumvented — someone with database access can disable a trigger, edit a row and
-/// re-enable it, leaving nothing behind. The chain closes that gap: altering any entry invalidates
-/// every hash after it, and the break is detectable without needing an untouched copy to compare
-/// against. For a system whose stated purpose is surviving regular regulatory audits, being able to
-/// demonstrate the trail is intact is worth more than asserting that it cannot be edited.
+/// <b>Hash chaining (ADR-013).</b> Each entry stores a SHA-256 digest of its own fields
+/// combined with the previous entry's hash. A DB trigger and the application guard both
+/// <em>prevent</em> tampering; neither can <em>detect</em> it if prevention is circumvented
+/// (a superuser can disable a trigger). The chain closes that gap: altering any entry
+/// invalidates every subsequent hash, detectable without an untouched reference copy.
 /// </para>
 /// </remarks>
 public sealed class StatusChange
@@ -120,15 +112,11 @@ public sealed class StatusChange
             : trimmed;
     }
 
-    /// <summary>
-    /// Builds the canonical byte representation of an entry and hashes it.
-    /// </summary>
+    /// <summary>Builds the canonical byte representation of an entry and hashes it.</summary>
     /// <remarks>
-    /// The separator is a character that cannot occur in any of the inputs, so two different sets
-    /// of fields cannot serialise to the same string — without it, a reason ending in a delimiter
-    /// could be made to imitate the next field. Timestamps use round-trip "O" format under the
-    /// invariant culture so the digest does not depend on where the server is running, which is the
-    /// same hazard the code normalisation guards against elsewhere.
+    /// Fields are joined with U+001F (unit separator), which cannot appear in any input value,
+    /// so no two distinct field sets can produce the same canonical string. Timestamps use
+    /// round-trip "O" format under the invariant culture so the digest is locale-independent.
     /// </remarks>
     private static string ComputeHash(
         Guid visitId,

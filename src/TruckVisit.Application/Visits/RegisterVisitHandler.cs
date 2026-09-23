@@ -69,7 +69,7 @@ public sealed class RegisterVisitHandler(
             truck,
             driver,
             movements,
-            // Never from the request body: the audit trail has to name the authenticated caller.
+            // sub claim, never the request body — the audit trail must name the actual caller.
             createdBy: currentUser.UserId,
             createdTime: timeProvider.GetUtcNow());
 
@@ -80,8 +80,7 @@ public sealed class RegisterVisitHandler(
             await idempotencyStore.RememberAsync(key, currentUser.UserId, visit.Id, cancellationToken);
         }
 
-        // One SaveChanges for the visit, its history and the idempotency record: either the retry
-        // guard and the data both land, or neither does.
+        // One SaveChanges: visit, history and idempotency record all land together or not at all.
         await repository.SaveChangesAsync(cancellationToken);
 
         return new RegisterVisitResult(VisitMapper.ToDetail(visit), WasReplayed: false);
